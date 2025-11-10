@@ -13,15 +13,17 @@ public class ConnectionValidator: IConnectionValidator
     {
         try
         {
-            var client = new Client(authenticationCredentialsProviders);
-
-            await client.ExecuteWithErrorHandling(new RestRequest());
-
+            var client = new Client(authenticationCredentialsProviders.ToList());
+            
+            var apiRequest = new RestRequest("/api/v1/project");
+            var response = await client.ExecuteWithErrorHandling(apiRequest);
             return new()
             {
-                IsValid = true
+                IsValid = response.IsSuccessful,
+                Message = response.IsSuccessful ? "Connection successful." : "Connection failed."
             };
-        } catch(Exception ex)
+        } 
+        catch(Exception ex)
         {
             return new()
             {
@@ -29,6 +31,5 @@ public class ConnectionValidator: IConnectionValidator
                 Message = ex.Message
             };
         }
-
     }
 }
