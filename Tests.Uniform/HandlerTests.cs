@@ -1,8 +1,8 @@
-﻿using Apps.Appname.Handlers;
+using Apps.Uniform.Handlers;
 using Blackbird.Applications.Sdk.Common.Dynamic;
-using Tests.Appname.Base;
+using Tests.Uniform.Base;
 
-namespace Tests.Appname;
+namespace Tests.Uniform;
 
 [TestClass]
 public class HandlerTests : TestBase

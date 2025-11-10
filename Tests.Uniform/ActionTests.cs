@@ -1,7 +1,7 @@
-﻿using Apps.Appname.Actions;
-using Tests.Appname.Base;
+using Apps.Uniform.Actions;
+using Tests.Uniform.Base;
 
-namespace Tests.Appname;
+namespace Tests.Uniform;
 
 [TestClass]
 public class ActionTests : TestBase
