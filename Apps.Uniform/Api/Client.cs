@@ -24,7 +24,7 @@ public class Client : BlackBirdRestClient
 
     public override Task<RestResponse> ExecuteWithErrorHandling(RestRequest request)
     {
-        if (!request.Parameters.Any(x => x.Type == ParameterType.QueryString && x.Name == "projectId"))
+        if (request.Method == Method.Get && !request.Parameters.Any(x => x.Type == ParameterType.QueryString && x.Name == "projectId"))
         {
             var credentialProvider = _credentialsProviders.Get(CredNames.ProjectId);
             request.AddQueryParameter("projectId", credentialProvider.Value);

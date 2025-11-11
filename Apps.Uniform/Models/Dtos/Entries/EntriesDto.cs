@@ -1,6 +1,6 @@
 ﻿namespace Apps.Uniform.Models.Dtos.Entries;
 
-public class EntriesDto
+public class EntriesDto<T>
 {
-    public List<EntryDto> Entries { get; set; } = new();
+    public List<T> Entries { get; set; } = new();
 }

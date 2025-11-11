@@ -13,6 +13,7 @@
     <ItemGroup>
         <PackageReference Include="Blackbird.Applications.SDK.Blueprints" Version="1.0.1" />
         <PackageReference Include="Blackbird.Applications.Sdk.Utils" Version="1.0.25" />
+        <PackageReference Include="HtmlAgilityPack" Version="1.6.13" />
     </ItemGroup>
 
     <ItemGroup>
@@ -20,6 +21,10 @@
       <EmbeddedResource Include="image\icon.png">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </EmbeddedResource>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Utils\" />
     </ItemGroup>
 
 </Project>
