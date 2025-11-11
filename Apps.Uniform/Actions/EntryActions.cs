@@ -13,6 +13,7 @@ using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System.Net.Mime;
 using System.Text;
+using Blackbird.Applications.SDK.Blueprints;
 
 namespace Apps.Uniform.Actions;
 
@@ -20,6 +21,7 @@ namespace Apps.Uniform.Actions;
 public class EntryActions(InvocationContext invocationContext, IFileManagementClient fileManagementClient) : Invocable(invocationContext)
 {
     [Action("Search entries", Description = "Retrieve a list of entries based on specified criteria")]
+    [BlueprintActionDefinition(BlueprintAction.SearchContent)]
     public async Task<SearchEntriesResponse> SearchEntries([ActionParameter] SearchEntryRequest searchEntryRequest)
     {
         var apiRequest = new RestRequest("/api/v1/entries");
@@ -28,20 +30,52 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
             apiRequest.AddParameter("state", searchEntryRequest.State);
         }
         
-        var dtoResponse = await Client.ExecuteWithErrorHandling<EntriesDto<EntryDto>>(apiRequest);
+        if (searchEntryRequest.Locale != null)
+        {
+            apiRequest.AddParameter("locale", searchEntryRequest.Locale);
+        }
+        
+        if (searchEntryRequest.Slug != null)
+        {
+            apiRequest.AddParameter("slug", searchEntryRequest.Slug);
+        }
+        
+        var dtoResponse = await Client.AutoPaginateAsync<EntryDto>(apiRequest, json =>
+            JsonConvert.DeserializeObject<EntriesDto<EntryDto>>(json)?.Entries ?? []);
         return new SearchEntriesResponse()
         {
-            Entries = dtoResponse.Entries.Select(e => e.Data).ToList(),
-            TotalCount = dtoResponse.Entries.Count
+            Entries = dtoResponse.Select(e => e.Data).ToList(),
+            TotalCount = dtoResponse.Count
         };
     }
     
+    [Action("Get entry", Description = "Retrieve details of a specific entry by its ID")]
+    public async Task<EntryResponse> GetEntry([ActionParameter] GetEntryRequest getEntryRequest)
+    {
+        var apiRequest = new RestRequest("/api/v1/entries");
+        apiRequest.AddQueryParameter("entryIDs", getEntryRequest.ContentId);
+        if (getEntryRequest.State != null)
+        {
+            apiRequest.AddQueryParameter("state", getEntryRequest.State);
+        }
+        
+        var dtoResponse = await Client.ExecuteWithErrorHandling<EntriesDto<EntryDto>>(apiRequest);
+        var entryDto = dtoResponse.Entries.FirstOrDefault();
+        
+        if (entryDto == null)
+        {
+            throw new Exception($"Entry with ID {getEntryRequest.ContentId} not found");
+        }
+        
+        return entryDto.Data;
+    }
+    
     [Action("Download entry", Description = "Download entry as HTML file for translation")]
+    [BlueprintActionDefinition(BlueprintAction.DownloadContent)]
     public async Task<DownloadEntryResponse> DownloadEntry([ActionParameter] DownloadEntryRequest request)
     {
-        // Get entry by ID
         var entryRequest = new RestRequest("/api/v1/entries");
-        entryRequest.AddQueryParameter("entryIDs", request.EntryId);
+        entryRequest.AddQueryParameter("entryIDs", request.ContentId);
         if (request.State != null)
         {
             entryRequest.AddQueryParameter("state", request.State);
@@ -52,12 +86,11 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         
         if (entryDto == null)
         {
-            throw new Exception($"Entry with ID {request.EntryId} not found");
+            throw new Exception($"Entry with ID {request.ContentId} not found");
         }
         
         var entry = entryDto.Data;
         
-        // Get content types to determine which fields are localizable
         var contentTypesRequest = new RestRequest("/api/v1/content-types");
         var contentTypesResponse = await Client.ExecuteWithErrorHandling<ContentTypesDto>(contentTypesRequest);
         
@@ -69,15 +102,12 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         
         var localizableFields = contentType.Fields.Where(f => f.Localizable).ToList();
         
-        // Convert entry to JObject for processing
         var entryJson = JsonConvert.SerializeObject(entry);
         var entryData = JObject.Parse(entryJson);
         
-        // Convert to HTML
         var converter = new EntryToHtmlConverter(localizableFields, request.Locale);
-        var html = converter.ToHtml(entryData, entry.Id, entry.Name);
+        var html = converter.ToHtml(entryData, entry.Id, entry.Name, entryDto.State.ToString());
         
-        // Upload HTML file
         var fileReference = await fileManagementClient.UploadAsync(
             new MemoryStream(Encoding.UTF8.GetBytes(html)),
             MediaTypeNames.Text.Html,
@@ -90,9 +120,9 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
     }
     
     [Action("Upload entry", Description = "Update entry from translated HTML file")]
+    [BlueprintActionDefinition(BlueprintAction.UploadContent)]
     public async Task UploadEntry([ActionParameter] UploadEntryRequest request)
     {
-        // Download HTML file
         var fileStream = await fileManagementClient.DownloadAsync(request.Content);
         var memoryStream = new MemoryStream();
         await fileStream.CopyToAsync(memoryStream);
@@ -101,20 +131,17 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         var fileBytes = await memoryStream.GetByteData();
         var html = Encoding.UTF8.GetString(fileBytes);
         
-        // Extract entry metadata from HTML
-        var (entryId, originalLocale) = HtmlToEntryConverter.ExtractMetadata(html);
-        
+        var (entryId, originalLocale, state) = HtmlToEntryConverter.ExtractMetadata(html);
         if (string.IsNullOrEmpty(entryId))
         {
             throw new Exception("Invalid HTML: Entry ID not found in metadata");
         }
         
-        // Get original entry
         var entryRequest = new RestRequest("/api/v1/entries");
         entryRequest.AddQueryParameter("entryIDs", entryId);
-        if (request.State != null)
+        if (!string.IsNullOrEmpty(state))
         {
-            entryRequest.AddQueryParameter("state", request.State);
+            entryRequest.AddQueryParameter("state", state);
         }
         
         var entriesResponse = await Client.ExecuteWithErrorHandling<EntriesDto<EntryDetailsDto>>(entryRequest);
@@ -125,7 +152,6 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
             throw new Exception($"Entry with ID {entryId} not found");
         }
         
-        // Get content type to determine localizable fields
         var contentTypesRequest = new RestRequest("/api/v1/content-types");
         var contentTypesResponse = await Client.ExecuteWithErrorHandling<ContentTypesDto>(contentTypesRequest);
         
@@ -137,14 +163,10 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         
         var localizableFields = contentType.Fields.Where(f => f.Localizable).ToList();
         
-        // Convert entry DTO to full entry structure with metadata
         var fullEntryJson = JsonConvert.SerializeObject(entryDto);
         var fullEntry = JObject.Parse(fullEntryJson);
-        
-        var state = int.TryParse(request.State, out var parsedState) ? parsedState : 0;
         fullEntry.Add("state", state);
         
-        // Update entry from HTML
         var entryData = fullEntry["entry"] as JObject;
         if (entryData == null)
         {
@@ -154,7 +176,6 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         var htmlConverter = new HtmlToEntryConverter(localizableFields);
         htmlConverter.UpdateEntryFromHtml(html, entryData, request.Locale);
         
-        // Update entry via API
         var updateRequest = new RestRequest("/api/v1/entries", Method.Put);
         updateRequest.AddJsonBody(fullEntry.ToString());
         

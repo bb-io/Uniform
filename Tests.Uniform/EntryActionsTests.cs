@@ -27,6 +27,38 @@ public class EntryActionsTests : TestBase
     }
     
     [TestMethod]
+    public async Task GetEntry_WithValidEntryId_ReturnsEntryDetails()
+    {
+        // Arrange
+        var actions = new EntryActions(InvocationContext, FileManager);
+        
+        // First, get an entry ID from search
+        var searchRequest = new Apps.Uniform.Models.Requests.Entries.SearchEntryRequest
+        {
+            State = "0"
+        };
+        var searchResponse = await actions.SearchEntries(searchRequest);
+        Assert.IsTrue(searchResponse.Entries.Count > 0, "No entries found to test get entry");
+        
+        var firstEntry = searchResponse.Entries.First();
+        
+        var getRequest = new Apps.Uniform.Models.Requests.Entries.GetEntryRequest
+        {
+            ContentId = firstEntry.Id,
+            State = "0"
+        };
+        
+        // Act
+        var response = await actions.GetEntry(getRequest);
+        
+        // Assert
+        Assert.IsNotNull(response);
+        Assert.AreEqual(firstEntry.Id, response.Id);
+        
+        PrintObject(response);
+    }
+    
+    [TestMethod]
     public async Task DownloadEntry_WithValidEntryId_ReturnsHtmlFile()
     {
         // Arrange
@@ -45,7 +77,7 @@ public class EntryActionsTests : TestBase
         
         var downloadRequest = new Apps.Uniform.Models.Requests.Entries.DownloadEntryRequest
         {
-            EntryId = firstEntry.Id,
+            ContentId = firstEntry.Id,
             Locale = locale,
             State = "0"
         };
@@ -75,8 +107,7 @@ public class EntryActionsTests : TestBase
                 Name = "The Hobbit_en-US.html",
                 ContentType = "text/html",
             },
-            Locale = "fr-FR",
-            State = "0"
+            Locale = "fr-FR"
         };
         
         // Act & Assert (should not throw)

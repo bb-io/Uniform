@@ -17,7 +17,7 @@ public class EntryToHtmlConverter
         _locale = locale;
     }
     
-    public string ToHtml(JObject entryData, string entryId, string entryName)
+    public string ToHtml(JObject entryData, string entryId, string entryName, string state)
     {
         var doc = new HtmlDocument();
         var html = doc.CreateElement("html");
@@ -30,6 +30,7 @@ public class EntryToHtmlConverter
         AddMetaTag(doc, head, "blackbird-entry-id", entryId);
         AddMetaTag(doc, head, "blackbird-locale", _locale);
         AddMetaTag(doc, head, "blackbird-entry-name", entryName);
+        AddMetaTag(doc, head, "blackbird-entry-state", state);
         
         var body = doc.CreateElement("body");
         html.AppendChild(body);

@@ -14,18 +14,20 @@ public class HtmlToEntryConverter
         _localizableFields = localizableFields;
     }
     
-    public static (string entryId, string locale) ExtractMetadata(string html)
+    public static (string entryId, string locale, string state) ExtractMetadata(string html)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
         
         var entryIdMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-entry-id']");
         var localeMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-locale']");
+        var stateMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-entry-state']");
         
         var entryId = entryIdMeta?.GetAttributeValue("content", "") ?? "";
         var locale = localeMeta?.GetAttributeValue("content", "") ?? "";
+        var state = stateMeta?.GetAttributeValue("content", "") ?? "";
         
-        return (entryId, locale);
+        return (entryId, locale, state);
     }
     
     public void UpdateEntryFromHtml(string html, JObject entryData, string targetLocale)

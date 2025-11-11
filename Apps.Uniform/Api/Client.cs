@@ -1,4 +1,5 @@
 using Apps.Uniform.Constants;
+using Apps.Uniform.Models.Dtos;
 using Blackbird.Applications.Sdk.Common.Authentication;
 using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
@@ -31,6 +32,33 @@ public class Client : BlackBirdRestClient
         }
         
         return base.ExecuteWithErrorHandling(request);
+    }
+
+    public async Task<List<T>> AutoPaginateAsync<T>(RestRequest request, Func<string, List<T>> mapFunction)
+    {
+        const int limit = 100;
+        int offset = 0;
+        
+        var allItems = new List<T>();
+        while (true)
+        {
+            request.AddOrUpdateParameter("limit", limit);
+            request.AddOrUpdateParameter("offset", offset);
+
+            var response = await ExecuteWithErrorHandling(request);
+            var content = response.Content ?? string.Empty;
+            var items = mapFunction.Invoke(content);
+            
+            allItems.AddRange(items);
+            if (items.Count < limit)
+            {
+                break;
+            }
+
+            offset += limit;
+        }
+        
+        return allItems;
     }
 
     protected override Exception ConfigureErrorException(RestResponse response)
