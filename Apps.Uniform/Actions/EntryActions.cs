@@ -94,7 +94,11 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
     {
         // Download HTML file
         var fileStream = await fileManagementClient.DownloadAsync(request.Content);
-        var fileBytes = await fileStream.GetByteData();
+        var memoryStream = new MemoryStream();
+        await fileStream.CopyToAsync(memoryStream);
+        memoryStream.Position = 0;
+        
+        var fileBytes = await memoryStream.GetByteData();
         var html = Encoding.UTF8.GetString(fileBytes);
         
         // Extract entry metadata from HTML
