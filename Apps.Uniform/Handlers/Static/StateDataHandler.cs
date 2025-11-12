@@ -3,7 +3,7 @@ using Blackbird.Applications.Sdk.Common.Dynamic;
 
 namespace Apps.Uniform.Handlers.Static;
 
-public class EntryStateDataHandler : IStaticDataSourceItemHandler
+public class StateDataHandler : IStaticDataSourceItemHandler
 {
     public IEnumerable<DataSourceItem> GetData()
     {

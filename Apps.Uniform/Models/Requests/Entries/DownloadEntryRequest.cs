@@ -15,6 +15,6 @@ public class DownloadEntryRequest : IDownloadContentInput
     [Display("Locale", Description = "The locale to download the entry for"), DataSource(typeof(LocaleDataHandler))]
     public string Locale { get; set; } = string.Empty;
     
-    [Display("State", Description = "Entry state (0=Draft, 64=Published)"), StaticDataSource(typeof(EntryStateDataHandler))]
+    [Display("State", Description = "Entry state (0=Draft, 64=Published)"), StaticDataSource(typeof(StateDataHandler))]
     public string? State { get; set; }
 }

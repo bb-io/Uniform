@@ -8,7 +8,7 @@ namespace Apps.Uniform.Models.Requests.Entries;
 
 public class SearchEntryRequest
 {
-    [Display("State"), StaticDataSource(typeof(EntryStateDataHandler))]
+    [Display("State"), StaticDataSource(typeof(StateDataHandler))]
     public string? State { get; set; }
     
     [Display("Locale"), DataSource(typeof(LocaleDataHandler))]

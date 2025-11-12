@@ -6,6 +6,6 @@ namespace Apps.Uniform.Events.Models;
 
 public class EntryFilters
 {
-    [Display("State"), StaticDataSource(typeof(EntryStateDataHandler))]
+    [Display("State"), StaticDataSource(typeof(StateDataHandler))]
     public string? State { get; set; }
 }

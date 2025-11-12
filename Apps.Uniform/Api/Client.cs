@@ -5,6 +5,7 @@ using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
 using Blackbird.Applications.Sdk.Utils.RestSharp;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using RestSharp;
 
 namespace Apps.Uniform.Api;
@@ -78,7 +79,26 @@ public class Client : BlackBirdRestClient
             return new PluginApplicationException(response.Content);
         }
         
-        var errorDto = JsonConvert.DeserializeObject<Models.Dtos.ErrorDto>(response.Content);
-        return new PluginApplicationException(string.Join(", ", errorDto?.ErrorMessage ?? new List<string> { $"Request failed with status code {response.StatusCode}, {response.StatusDescription}" }));
+        var errorJObject = JsonConvert.DeserializeObject<JObject>(response.Content);
+        var errorMessage = string.Empty;
+        if(errorJObject!["errorMessage"] != null)
+        {
+            if(errorJObject["errorMessage"]!.Type == JTokenType.Array)
+            {
+                var messages = errorJObject["errorMessage"]!.ToObject<List<string>>();
+                errorMessage = string.Join(", ", messages ?? new List<string>());
+            }
+            else if(errorJObject["errorMessage"]!.Type == JTokenType.String)
+            {
+                errorMessage = errorJObject["errorMessage"]!.ToString() ?? string.Empty;
+            }
+        }
+        
+        if(string.IsNullOrEmpty(errorMessage))
+        {
+            errorMessage = $"Request failed with status code {response.StatusCode}, {response.StatusDescription}";
+        }
+        
+        return new PluginApplicationException(errorMessage);
     }
 }

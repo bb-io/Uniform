@@ -18,6 +18,6 @@ public class UploadEntryRequest : IUploadContentInput
     [Display("Content ID", Description = "The ID of the content to update"), DataSource(typeof(EntryDataHandler))]
     public string? ContentId { get; set; }
     
-    [Display("State", Description = "The state of the entry to update"), StaticDataSource(typeof(EntryStateDataHandler))]
+    [Display("State", Description = "The state of the entry to update"), StaticDataSource(typeof(StateDataHandler))]
     public string? State { get; set; }
 }

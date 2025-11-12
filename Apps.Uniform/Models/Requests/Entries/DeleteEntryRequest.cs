@@ -9,6 +9,6 @@ public class DeleteEntryRequest
     [Display("Entry ID")]
     public string ContentId { get; set; } = null!;
     
-    [Display("State"), StaticDataSource(typeof(EntryStateDataHandler))]
+    [Display("State"), StaticDataSource(typeof(StateDataHandler))]
     public string? State { get; set; }
 }
