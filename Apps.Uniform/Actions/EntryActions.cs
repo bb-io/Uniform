@@ -15,7 +15,10 @@ using System.Net.Mime;
 using System.Text;
 using Apps.Uniform.Constants;
 using Blackbird.Applications.SDK.Blueprints;
+using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
+using Blackbird.Filters.Transformations;
+using Blackbird.Filters.Xliff.Xliff2;
 
 namespace Apps.Uniform.Actions;
 
@@ -132,6 +135,14 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         
         var fileBytes = await memoryStream.GetByteData();
         var html = Encoding.UTF8.GetString(fileBytes);
+        if (Xliff2Serializer.IsXliff2(html))
+        {
+            html = Transformation.Parse(html, request.Content.Name).Target().Serialize();
+            if (html == null)
+            {
+                throw new PluginMisconfigurationException("XLIFF did not contain any files");
+            }
+        }
         
         var (entryId, originalLocale, state) = HtmlToEntryConverter.ExtractMetadata(html);
         if (string.IsNullOrEmpty(entryId))
