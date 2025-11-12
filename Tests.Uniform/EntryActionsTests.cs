@@ -21,7 +21,7 @@ public class EntryActionsTests : TestBase
         
         // Assert
         Assert.IsNotNull(response);
-        Assert.IsNotNull(response.Entries);
+        Assert.IsNotNull(response.Items);
 
         PrintObject(response);
     }
@@ -38,9 +38,9 @@ public class EntryActionsTests : TestBase
             State = "0"
         };
         var searchResponse = await actions.SearchEntries(searchRequest);
-        Assert.IsTrue(searchResponse.Entries.Count > 0, "No entries found to test get entry");
+        Assert.IsTrue(searchResponse.Items.Any(), "No entries found to test get entry");
         
-        var firstEntry = searchResponse.Entries.First();
+        var firstEntry = searchResponse.Items.First();
         
         var getRequest = new Apps.Uniform.Models.Requests.Entries.GetEntryRequest
         {
@@ -70,9 +70,9 @@ public class EntryActionsTests : TestBase
             State = "0"
         };
         var searchResponse = await actions.SearchEntries(searchRequest);
-        Assert.IsTrue(searchResponse.Entries.Count > 0, "No entries found to test download");
+        Assert.IsTrue(searchResponse.Items.Any(), "No entries found to test download");
         
-        var firstEntry = searchResponse.Entries.First();
+        var firstEntry = searchResponse.Items.First();
         var locale = firstEntry.SupportedLocales.FirstOrDefault() ?? "en-US";
         
         var downloadRequest = new Apps.Uniform.Models.Requests.Entries.DownloadEntryRequest

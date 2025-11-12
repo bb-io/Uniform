@@ -13,7 +13,9 @@ using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using System.Net.Mime;
 using System.Text;
+using Apps.Uniform.Constants;
 using Blackbird.Applications.SDK.Blueprints;
+using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
 
 namespace Apps.Uniform.Actions;
 
@@ -44,7 +46,7 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
             JsonConvert.DeserializeObject<EntriesDto<EntryDto>>(json)?.Entries ?? []);
         return new SearchEntriesResponse()
         {
-            Entries = dtoResponse.Select(e => e.Data).ToList(),
+            Items = dtoResponse.Select(e => e.Data).ToList(),
             TotalCount = dtoResponse.Count
         };
     }
@@ -180,5 +182,26 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         updateRequest.AddJsonBody(fullEntry.ToString());
         
         await Client.ExecuteWithErrorHandling(updateRequest);
+    }
+    
+    [Action("Delete entry", Description = "Deletes or unpublishes an entry by its ID")]
+    public async Task DeleteEntry([ActionParameter] DeleteEntryRequest deleteEntryRequest)
+    {
+        var projectId = CredentialsProviders.Get(CredNames.ProjectId).Value;
+        var bodyDictionary = new Dictionary<string, object>
+        {
+            { "entryId", deleteEntryRequest.ContentId },
+            { "projectId", projectId }
+        };
+        
+        if(deleteEntryRequest.State != null)
+        {
+            bodyDictionary.Add("state", deleteEntryRequest.State);
+        }
+        
+        var apiRequest = new RestRequest($"/api/v1/entries/{deleteEntryRequest.ContentId}", Method.Delete)
+            .AddJsonBody(bodyDictionary);
+        
+        await Client.ExecuteWithErrorHandling(apiRequest);
     }
 }

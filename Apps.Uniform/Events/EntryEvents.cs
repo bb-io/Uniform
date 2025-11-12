@@ -129,7 +129,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
         {
             Result = new SearchEntriesResponse
             {
-                Entries = entries,
+                Items = entries,
                 TotalCount = entries.Count
             },
             FlyBird = entries.Count > 0,

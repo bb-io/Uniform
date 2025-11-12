@@ -1,9 +1,10 @@
-﻿using Blackbird.Applications.Sdk.Common;
+﻿using Blackbird.Applications.SDK.Blueprints.Interfaces.CMS;
+using Blackbird.Applications.Sdk.Common;
 using Newtonsoft.Json;
 
 namespace Apps.Uniform.Models.Responses.Entries;
 
-public class EntryResponse
+public class EntryResponse : IContentOutput
 {
     [Display("Entry ID"), JsonProperty("_id")]
     public string Id { get; set; } = string.Empty;
