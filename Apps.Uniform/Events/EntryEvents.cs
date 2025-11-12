@@ -39,7 +39,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
     }
 
     [PollingEvent("On entries published", Description = "Polling event that periodically checks for newly published or updated published entries")]
-    [BlueprintEventDefinition(BlueprintEvent.ContentCreatedOrUpdated)]
+    [BlueprintEventDefinition(BlueprintEvent.ContentCreatedOrUpdatedMultiple)]
     public async Task<PollingEventResponse<DateMemory, SearchEntriesResponse>> OnEntriesPublishedAsync(
         PollingEventRequest<DateMemory> request)
     {
