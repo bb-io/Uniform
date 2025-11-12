@@ -178,7 +178,10 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         
         var fullEntryJson = JsonConvert.SerializeObject(entryDto);
         var fullEntry = JObject.Parse(fullEntryJson);
-        fullEntry.Add("state", state);
+        if (fullEntry["state"] == null)
+        {
+            fullEntry.Add("state", state);
+        }
         
         var entryData = fullEntry["entry"] as JObject;
         if (entryData == null)

@@ -104,10 +104,10 @@ public class EntryActionsTests : TestBase
         {
             Content = new()
             {
-                Name = "The Hobbit_en-US.html",
+                Name = "The Hobbit_en-US.html.xlf",
                 ContentType = "text/html",
             },
-            Locale = "fr-FR"
+            Locale = "de-DE"
         };
         
         // Act & Assert (should not throw)

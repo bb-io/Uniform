@@ -62,6 +62,31 @@ public class EntryEventsTests : TestBase
         PrintObject(response);
         Console.WriteLine($"Found {response.Result.TotalCount} new entries");
     }
+    
+    [TestMethod]
+    public async Task OnEntriesPublishedAsync_WithMemory_ReturnsNewEntries()
+    {
+        // Arrange
+        var events = new EntryEvents(InvocationContext);
+        var request = new PollingEventRequest<DateMemory>
+        {
+            Memory = new DateMemory
+            {
+                LastPollingTime = DateTime.UtcNow.AddMinutes(-3)
+            }
+        };
+
+        // Act
+        var response = await events.OnEntriesPublishedAsync(request);
+
+        // Assert
+        Assert.IsNotNull(response);
+        Assert.IsNotNull(response.Memory);
+        Assert.IsNotNull(response.Result);
+        
+        PrintObject(response);
+        Console.WriteLine($"Found {response.Result.TotalCount} new entries");
+    }
 
     [TestMethod]
     public async Task OnEntriesUpdated_WithMemory_ReturnsUpdatedEntries()
