@@ -144,7 +144,7 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
             }
         }
         
-        var (entryId, originalLocale, state) = HtmlToEntryConverter.ExtractMetadata(html);
+        var (entryId, originalLocale) = HtmlToEntryConverter.ExtractMetadata(html);
         if (string.IsNullOrEmpty(entryId))
         {
             throw new Exception("Invalid HTML: Entry ID not found in metadata");
@@ -152,9 +152,10 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         
         var entryRequest = new RestRequest("/api/v1/entries");
         entryRequest.AddQueryParameter("entryIDs", entryId);
-        if (!string.IsNullOrEmpty(state))
+        var originalState = request.State ?? "0";
+        if (!string.IsNullOrEmpty(originalState))
         {
-            entryRequest.AddQueryParameter("state", state);
+            entryRequest.AddQueryParameter("state", originalState);
         }
         
         var entriesResponse = await Client.ExecuteWithErrorHandling<EntriesDto<EntryDetailsDto>>(entryRequest);
@@ -180,7 +181,7 @@ public class EntryActions(InvocationContext invocationContext, IFileManagementCl
         var fullEntry = JObject.Parse(fullEntryJson);
         if (fullEntry["state"] == null)
         {
-            fullEntry.Add("state", state);
+            fullEntry.Add("state", originalState);
         }
         
         var entryData = fullEntry["entry"] as JObject;

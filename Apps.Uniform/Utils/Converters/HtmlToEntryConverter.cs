@@ -14,7 +14,7 @@ public class HtmlToEntryConverter
         _localizableFields = localizableFields;
     }
     
-    public static (string entryId, string locale, string state) ExtractMetadata(string html)
+    public static (string entryId, string locale) ExtractMetadata(string html)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
@@ -27,7 +27,7 @@ public class HtmlToEntryConverter
         var locale = localeMeta?.GetAttributeValue("content", "") ?? "";
         var state = stateMeta?.GetAttributeValue("content", "") ?? "";
         
-        return (entryId, locale, state);
+        return (entryId, locale);
     }
     
     public void UpdateEntryFromHtml(string html, JObject entryData, string targetLocale)
