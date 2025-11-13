@@ -47,6 +47,8 @@ More details can be found in the [Uniform documentation](https://docs.uniform.ap
 5. Click _Connect_
 6. Confirm that the connection has appeared and the status is _Connected_
 
+![Connection](image/README/connection.png)
+
 ## Actions
 
 ### Entries
