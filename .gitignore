@@ -367,3 +367,5 @@ MigrationBackup/
 FodyWeavers.xsd
 
 */appsettings.json
+
+/Tests.Uniform/TestFiles/Output
