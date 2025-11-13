@@ -9,6 +9,14 @@ using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
 using Newtonsoft.Json;
 using RestSharp;
+using Apps.Uniform.Models.Dtos.Canvas;
+using Apps.Uniform.Utils.Converters;
+using System.Net.Mime;
+using System.Text;
+using Newtonsoft.Json.Linq;
+using Blackbird.Applications.Sdk.Utils.Extensions.Files;
+using Blackbird.Filters.Transformations;
+using Blackbird.Filters.Xliff.Xliff2;
 
 namespace Apps.Uniform.Actions;
 
@@ -107,5 +115,137 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             .AddJsonBody(bodyDictionary);
 
         await Client.ExecuteWithErrorHandling(apiRequest);
+    }
+    
+    [Action("Download composition", Description = "Download composition as HTML file for translation")]
+    public async Task<DownloadCompositionResponse> DownloadComposition([ActionParameter] DownloadCompositionRequest request)
+    {
+        var compositionRequest = new RestRequest("/api/v1/canvas");
+        compositionRequest.AddQueryParameter("compositionId", request.CompositionId);
+        if (request.State != null)
+        {
+            compositionRequest.AddQueryParameter("state", request.State);
+        }
+        
+        var compositionResponse = await Client.ExecuteWithErrorHandling(compositionRequest);
+        var compositionDto = JsonConvert.DeserializeObject<CompositionDetailsDto>(compositionResponse.Content ?? string.Empty);
+        
+        if (compositionDto == null)
+        {
+            throw new PluginApplicationException($"Composition with ID {request.CompositionId} not found");
+        }
+        
+        var composition = compositionDto.Data;
+        
+        // Get canvas definitions to determine which parameters are localizable
+        var canvasDefinitionsRequest = new RestRequest("/api/v1/canvas-definitions");
+        var canvasDefinitionsResponse = await Client.ExecuteWithErrorHandling<CanvasDefinitionsDto>(canvasDefinitionsRequest);
+        
+        // Collect all localizable parameters from all component definitions
+        var localizableParameters = canvasDefinitionsResponse.ComponentDefinitions
+            .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
+            .ToList();
+        
+        var compositionJson = JsonConvert.SerializeObject(composition);
+        var compositionData = JObject.Parse(compositionJson);
+        
+        var converter = new CompositionToHtmlConverter(localizableParameters, request.Locale);
+        var html = converter.ToHtml(compositionData, composition.Id, composition.Name, compositionDto.State.ToString());
+        
+        var fileReference = await fileManagementClient.UploadAsync(
+            new MemoryStream(Encoding.UTF8.GetBytes(html)),
+            MediaTypeNames.Text.Html,
+            $"{composition.Name}_{request.Locale}.html");
+        
+        return new DownloadCompositionResponse
+        {
+            Content = fileReference
+        };
+    }
+    
+    [Action("Upload composition", Description = "Update composition from translated HTML file")]
+    public async Task UploadComposition([ActionParameter] UploadCompositionRequest request)
+    {
+        var fileStream = await fileManagementClient.DownloadAsync(request.Content);
+        var memoryStream = new MemoryStream();
+        await fileStream.CopyToAsync(memoryStream);
+        memoryStream.Position = 0;
+        
+        var fileBytes = await memoryStream.GetByteData();
+        var html = Encoding.UTF8.GetString(fileBytes);
+        
+        // Handle XLIFF format if provided
+        if (Xliff2Serializer.IsXliff2(html))
+        {
+            html = Transformation.Parse(html, request.Content.Name).Target().Serialize();
+            if (html == null)
+            {
+                throw new PluginMisconfigurationException("XLIFF did not contain any files");
+            }
+        }
+        
+        var (compositionId, originalLocale) = HtmlToCompositionConverter.ExtractMetadata(html);
+        if (string.IsNullOrEmpty(compositionId))
+        {
+            throw new PluginApplicationException("Invalid HTML: Composition ID not found in metadata");
+        }
+        
+        // Get the original composition
+        var compositionRequest = new RestRequest("/api/v1/canvas");
+        compositionRequest.AddQueryParameter("compositionId", compositionId);
+        var originalState = request.State ?? "0";
+        if (!string.IsNullOrEmpty(originalState))
+        {
+            compositionRequest.AddQueryParameter("state", originalState);
+        }
+        
+        var compositionResponse = await Client.ExecuteWithErrorHandling(compositionRequest);
+        var compositionDto = JsonConvert.DeserializeObject<CompositionDetailsDto>(compositionResponse.Content ?? string.Empty);
+        
+        if (compositionDto == null)
+        {
+            throw new PluginApplicationException($"Composition with ID {compositionId} not found");
+        }
+        
+        // Get canvas definitions to determine which parameters are localizable
+        var canvasDefinitionsRequest = new RestRequest("/api/v1/canvas-definitions");
+        var canvasDefinitionsResponse = await Client.ExecuteWithErrorHandling<CanvasDefinitionsDto>(canvasDefinitionsRequest);
+        
+        var localizableParameters = canvasDefinitionsResponse.ComponentDefinitions
+            .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
+            .ToList();
+        
+        // Prepare the full composition object with the wrapper
+        var fullCompositionJson = JsonConvert.SerializeObject(compositionDto);
+        var fullComposition = JObject.Parse(fullCompositionJson);
+        
+        if (fullComposition["state"] == null)
+        {
+            fullComposition.Add("state", originalState);
+        }
+        
+        var compositionData = fullComposition["composition"] as JObject;
+        if (compositionData == null)
+        {
+            throw new PluginApplicationException("Invalid composition structure");
+        }
+        
+        // Update composition with translated content
+        var htmlConverter = new HtmlToCompositionConverter(localizableParameters);
+        htmlConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
+        
+        compositionData.Remove("pattern");
+        compositionData.Remove("patternType");
+        compositionData.Remove("categoryId");
+        compositionData.Remove("description");
+        compositionData.Remove("previewImageUrl");
+        compositionData.Remove("editionId");
+        compositionData.Remove("editionName");
+        
+        // Send update request
+        var updateRequest = new RestRequest("/api/v1/canvas", Method.Put);
+        updateRequest.AddJsonBody(fullComposition.ToString());
+        
+        await Client.ExecuteWithErrorHandling(updateRequest);
     }
 }

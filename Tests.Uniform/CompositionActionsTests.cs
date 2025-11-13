@@ -95,4 +95,48 @@ public class CompositionActionsTests : TestBase
         await actions.DeleteComposition(deleteRequest);
         Console.WriteLine($"Draft composition {compositionId} deleted successfully");
     }
+    
+    [TestMethod]
+    public async Task DownloadComposition_WithValidCompositionId_ReturnsHtmlFile()
+    {
+        // Arrange
+        var actions = new CompositionActions(InvocationContext, FileManager);
+        var downloadRequest = new Apps.Uniform.Models.Requests.Compositions.DownloadCompositionRequest
+        {
+            CompositionId = "f17bfbeb-ed65-4c3b-8175-9149e61a6472",
+            Locale = "en-US",
+            State = "0"
+        };
+        
+        // Act
+        var response = await actions.DownloadComposition(downloadRequest);
+        
+        // Assert
+        Assert.IsNotNull(response);
+        Assert.IsNotNull(response.Content);
+        Assert.IsTrue(response.Content.Name.EndsWith(".html"));
+        
+        PrintObject(response);
+    }
+    
+    [TestMethod]
+    public async Task UploadComposition_WithValidHtmlFile_UpdatesComposition()
+    {
+        // Arrange
+        var actions = new CompositionActions(InvocationContext, FileManager);
+        var uploadRequest = new Apps.Uniform.Models.Requests.Compositions.UploadCompositionRequest
+        {
+            Content = new()
+            {
+                Name = "Dynamic Jira Template_en-US.html",
+                ContentType = "text/html",
+            },
+            Locale = "fr-FR",
+            State = "0"
+        };
+        
+        // Act & Assert (should not throw)
+        await actions.UploadComposition(uploadRequest);
+        Console.WriteLine("Composition uploaded successfully");
+    }
 }
