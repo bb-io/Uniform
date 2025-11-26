@@ -190,7 +190,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             throw new PluginApplicationException("Invalid HTML: Composition ID not found in metadata");
         }
         
-        // Get the original composition
+        // Get the original composition to extract state
         var compositionRequest = new RestRequest("/api/v1/canvas");
         compositionRequest.AddQueryParameter("compositionId", compositionId);
         var originalState = request.State ?? "0";
@@ -207,7 +207,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             throw new PluginApplicationException($"Composition with ID {compositionId} not found");
         }
         
-        // Get canvas definitions to determine which parameters are localizable
+        // Get canvas definitions (needed for HtmlToCompositionConverter constructor)
         var canvasDefinitionsRequest = new RestRequest("/api/v1/canvas-definitions");
         var canvasDefinitionsResponse = await Client.ExecuteWithErrorHandling<CanvasDefinitionsDto>(canvasDefinitionsRequest);
         
@@ -215,25 +215,20 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
             .ToList();
         
-        // Prepare the full composition object with the wrapper
-        var fullCompositionJson = JsonConvert.SerializeObject(compositionDto);
-        var fullComposition = JObject.Parse(fullCompositionJson);
+        // Create a new composition object that will be populated from HTML
+        var compositionData = new JObject();
         
-        if (fullComposition["state"] == null)
-        {
-            fullComposition.Add("state", originalState);
-        }
-        
-        var compositionData = fullComposition["composition"] as JObject;
-        if (compositionData == null)
-        {
-            throw new PluginApplicationException("Invalid composition structure");
-        }
-        
-        // Update composition with translated content
+        // Update composition with translated content using the new converter logic
         var htmlConverter = new HtmlToCompositionConverter(localizableParameters);
         htmlConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
         
+        // Prepare the full composition object with the wrapper
+        var fullComposition = new JObject();
+        fullComposition.Add("compositionId", compositionId);
+        fullComposition.Add("state", originalState);
+        fullComposition.Add("composition", compositionData);
+        
+        // Remove unnecessary fields that shouldn't be in update request
         compositionData.Remove("pattern");
         compositionData.Remove("patternType");
         compositionData.Remove("categoryId");

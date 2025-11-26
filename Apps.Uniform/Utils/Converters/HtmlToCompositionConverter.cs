@@ -1,5 +1,6 @@
 using Apps.Uniform.Models.Dtos.Canvas;
 using HtmlAgilityPack;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Web;
 
@@ -33,14 +34,46 @@ public class HtmlToCompositionConverter
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
         
-        var compositionDiv = doc.DocumentNode.SelectSingleNode("//div[@data-composition-id]");
-        if (compositionDiv == null)
+        var body = doc.DocumentNode.SelectSingleNode("//body");
+        if (body == null)
         {
-            throw new Exception("Invalid HTML: Composition div not found");
+            throw new Exception("Invalid HTML: Body element not found");
         }
         
-        // Update parameters
-        UpdateParametersFromHtml(doc, compositionData, targetLocale);
+        // Extract original JSON from body attribute
+        var originalJsonEncoded = body.GetAttributeValue("data-original-json", "");
+        if (string.IsNullOrEmpty(originalJsonEncoded))
+        {
+            throw new Exception("Invalid HTML: Original JSON not found in body attribute");
+        }
+        
+        var originalJson = HttpUtility.HtmlDecode(originalJsonEncoded);
+        var originalComposition = JObject.Parse(originalJson);
+        
+        // Copy the original composition structure to compositionData
+        foreach (var prop in originalComposition.Properties())
+        {
+            compositionData[prop.Name] = prop.Value.DeepClone();
+        }
+        
+        // Now update with translated values using json-path
+        var parameterDivs = doc.DocumentNode.SelectNodes("//div[@data-json-path]");
+        if (parameterDivs != null)
+        {
+            foreach (var parameterDiv in parameterDivs)
+            {
+                var jsonPath = parameterDiv.GetAttributeValue("data-json-path", "");
+                if (string.IsNullOrEmpty(jsonPath)) continue;
+                
+                var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
+                if (textNode == null) continue;
+                
+                var translatedText = HttpUtility.HtmlDecode(textNode.InnerText);
+                
+                // Update the value at the json-path
+                UpdateValueByJsonPath(compositionData, jsonPath, translatedText, targetLocale);
+            }
+        }
         
         // Ensure target locale is in _locales array
         var locales = compositionData["_locales"] as JArray;
@@ -56,114 +89,81 @@ public class HtmlToCompositionConverter
         }
     }
     
-    private void UpdateParametersFromHtml(HtmlDocument doc, JObject compositionData, string targetLocale)
+    private void UpdateValueByJsonPath(JObject compositionData, string jsonPath, string value, string targetLocale)
     {
-        var parameterDivs = doc.DocumentNode.SelectNodes("//div[@data-parameter-id]");
-        if (parameterDivs == null) return;
+        // Parse the json-path (format: "parameters.text.locales.en-US" or "slots.component[0].parameters.text.locales.en-US")
+        var pathParts = new List<string>();
+        var currentPart = "";
         
-        // Track which parameters we've already updated by path
-        var updatedPaths = new HashSet<string>();
-        
-        foreach (var parameterDiv in parameterDivs)
+        for (int i = 0; i < jsonPath.Length; i++)
         {
-            var parameterId = parameterDiv.GetAttributeValue("data-parameter-id", "");
-            var parameterType = parameterDiv.GetAttributeValue("data-parameter-type", "");
-            
-            var parameterDef = _localizableParameters.FirstOrDefault(p => p.Id == parameterId);
-            if (parameterDef == null) continue;
-            
-            UpdateParameterInComposition(compositionData, parameterId, parameterType, parameterDiv, targetLocale, updatedPaths);
-        }
-    }
-    
-    private void UpdateParameterInComposition(JObject compositionData, string parameterId, string parameterType, HtmlNode parameterDiv, string targetLocale, HashSet<string> updatedPaths)
-    {
-        // Find and update the next unprocessed occurrence of the parameter
-        UpdateParameterRecursive(compositionData, parameterId, parameterType, parameterDiv, targetLocale, "", updatedPaths);
-    }
-    
-    private bool UpdateParameterRecursive(JObject obj, string parameterId, string parameterType, HtmlNode parameterDiv, string targetLocale, string currentPath, HashSet<string> updatedPaths)
-    {
-        bool found = false;
-        
-        // Check parameters at current level
-        var parameters = obj["parameters"] as JObject;
-        if (parameters != null && parameters.TryGetValue(parameterId, out var parameterData))
-        {
-            var paramObj = parameterData as JObject;
-            if (paramObj != null)
+            var c = jsonPath[i];
+            if (c == '.')
             {
-                var paramPath = $"{currentPath}.parameters.{parameterId}";
-                
-                // Only update if we haven't processed this specific parameter yet
-                if (!updatedPaths.Contains(paramPath))
+                if (!string.IsNullOrEmpty(currentPart))
                 {
-                    UpdateParameterValue(paramObj, parameterDiv, targetLocale);
-                    updatedPaths.Add(paramPath);
-                    return true; // Found and updated, stop searching
+                    pathParts.Add(currentPart);
+                    currentPart = "";
                 }
             }
-        }
-        
-        // Recursively check slots
-        var slots = obj["slots"] as JObject;
-        if (slots != null)
-        {
-            foreach (var slot in slots)
+            else if (c == '[')
             {
-                var slotArray = slot.Value as JArray;
-                if (slotArray == null) continue;
-                
-                for (int i = 0; i < slotArray.Count; i++)
+                if (!string.IsNullOrEmpty(currentPart))
                 {
-                    var component = slotArray[i] as JObject;
-                    if (component != null)
-                    {
-                        var slotPath = $"{currentPath}.slots.{slot.Key}[{i}]";
-                        if (UpdateParameterRecursive(component, parameterId, parameterType, parameterDiv, targetLocale, slotPath, updatedPaths))
-                        {
-                            return true; // Found and updated, stop searching
-                        }
-                    }
+                    pathParts.Add(currentPart);
                 }
+                var endIndex = jsonPath.IndexOf(']', i);
+                pathParts.Add(jsonPath.Substring(i, endIndex - i + 1));
+                i = endIndex;
+                currentPart = "";
             }
-        }
-        
-        return found;
-    }
-    
-    private void UpdateParameterValue(JObject parameterObj, HtmlNode parameterDiv, string targetLocale)
-    {
-        var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
-        if (textNode == null) return;
-        
-        var text = HttpUtility.HtmlDecode(textNode.InnerText);
-        
-        // Check if parameter uses locales structure
-        var locales = parameterObj["locales"] as JObject;
-        if (locales != null)
-        {
-            // Always update the target locale value, even if it exists
-            locales[targetLocale] = text;
-        }
-        else
-        {
-            // Create locales structure if it doesn't exist
-            var currentValue = parameterObj["value"]?.ToString();
-            locales = new JObject();
-            
-            // Preserve existing value if it exists
-            if (!string.IsNullOrEmpty(currentValue))
+            else
             {
-                // Try to determine the original locale from composition
-                locales["en-US"] = currentValue; // Default fallback
+                currentPart += c;
+            }
+        }
+        
+        if (!string.IsNullOrEmpty(currentPart))
+        {
+            pathParts.Add(currentPart);
+        }
+        
+        // Navigate to the target location
+        JToken? current = compositionData;
+        
+        // Navigate to the parent of the locale (stop before the last two parts: "locales" and locale code)
+        for (int i = 0; i < pathParts.Count - 2; i++)
+        {
+            var part = pathParts[i];
+            
+            if (part.StartsWith("[") && part.EndsWith("]"))
+            {
+                // Array index
+                var index = int.Parse(part.Substring(1, part.Length - 2));
+                current = current?[index];
+            }
+            else
+            {
+                // Object property
+                current = current?[part];
             }
             
-            locales[targetLocale] = text;
-            parameterObj["locales"] = locales;
-            
-            // Remove the old 'value' property if locales is used
-            // parameterObj.Remove("value");
+            if (current == null)
+            {
+                return; // Path not found, skip
+            }
         }
+        
+        // Now we should be at the parameter object, and need to update locales
+        var localesObj = current["locales"] as JObject;
+        if (localesObj == null)
+        {
+            // Create locales object if it doesn't exist
+            localesObj = new JObject();
+            current["locales"] = localesObj;
+        }
+        
+        // Set the target locale value
+        localesObj[targetLocale] = value;
     }
 }
