@@ -139,4 +139,20 @@ public class CompositionActionsTests : TestBase
         await actions.UploadComposition(uploadRequest);
         Console.WriteLine("Composition uploaded successfully");
     }
+
+    [TestMethod]
+    public async Task Get_Composition_Returns_Value()
+    {
+        var actions = new CompositionActions(InvocationContext, FileManager);
+        var compositionId = "b4fa7a4c-427a-403a-a255-8f37bb211d17";
+        var deleteRequest = new Apps.Uniform.Models.Requests.Compositions.GetCompositionRequest
+        {
+            CompositionId = compositionId,
+            State = "64"
+        };
+
+        var response = await actions.GetComposition(deleteRequest);
+        Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(response));
+        Assert.IsNotNull(response);
+    }
 }
