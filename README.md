@@ -79,6 +79,7 @@ More details can be found in the [Uniform documentation](https://docs.uniform.ap
 
 - **On compositions created**: Polling event that periodically checks for newly created compositions
 - **On compositions updated**: Polling event that periodically checks for updated compositions
+- **On compositions published**: Polling event that periodically checks for newly published or updated published compositions 
 
 ## Feedback
 
