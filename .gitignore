@@ -369,3 +369,4 @@ FodyWeavers.xsd
 */appsettings.json
 
 /Tests.Uniform/TestFiles/Output
+/Tests.Uniform/appsettings.json

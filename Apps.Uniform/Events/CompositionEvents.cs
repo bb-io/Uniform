@@ -25,6 +25,41 @@ public class CompositionEvents(InvocationContext invocationContext) : Invocable(
             c => c.CreatedAt > request.Memory!.LastPollingTime);
     }
 
+    [PollingEvent("On compositions published", Description = "Triggered when published compositions")]
+    public async Task<PollingEventResponse<DateMemory, SearchCompositionsResponse>> OnCompositionsPublishedAsync(
+         PollingEventRequest<DateMemory> request)
+    {
+        if (request.Memory == null)
+        {
+            return new()
+            {
+                FlyBird = false,
+                Result = null,
+                Memory = new DateMemory { LastPollingTime = DateTime.UtcNow }
+            };
+        }
+
+        var pollStartTime = DateTime.UtcNow;
+        var since = request.Memory.LastPollingTime;
+
+        var compositions = await FetchPublishedCompositionsPagedAsync(since);
+
+        var items = compositions
+            .Select(c => c.Data)
+            .ToList();
+
+        return new()
+        {
+            Result = new SearchCompositionsResponse
+            {
+                Items = items,
+                TotalCount = items.Count
+            },
+            FlyBird = items.Count > 0,
+            Memory = new DateMemory { LastPollingTime = pollStartTime }
+        };
+    }
+
     [PollingEvent("On compositions updated", Description = "Polling event that periodically checks for updated compositions")]
     public async Task<PollingEventResponse<DateMemory, SearchCompositionsResponse>> OnCompositionsUpdatedAsync(
         PollingEventRequest<DateMemory> request,
@@ -82,6 +117,49 @@ public class CompositionEvents(InvocationContext invocationContext) : Invocable(
                 LastPollingTime = DateTime.UtcNow
             }
         };
+    }
+
+    private async Task<List<CompositionDto>> FetchPublishedCompositionsPagedAsync(DateTime since)
+    {
+        var result = new List<CompositionDto>();
+        var offset = 0;
+
+        while (true)
+        {
+            var page = await FetchCompositionsPageAsync(offset);
+            if (page.Count == 0)
+                break;
+
+            foreach (var composition in page)
+            {
+                if (composition.UpdatedAt.HasValue && composition.UpdatedAt.Value > since)
+                {
+                    result.Add(composition);
+                }
+                else
+                {
+                    return result;
+                }
+            }
+
+            offset += PageLimit;
+        }
+
+        return result;
+    }
+
+    private async Task<List<CompositionDto>> FetchCompositionsPageAsync(int offset)
+    {
+        var apiRequest = new RestRequest("/api/v1/canvas");
+        apiRequest.AddParameter("state", "64");
+        apiRequest.AddParameter("orderBy", "updated_at_DESC");
+        apiRequest.AddParameter("limit", PageLimit);
+        apiRequest.AddParameter("offset", offset);
+
+        var response = await Client.ExecuteWithErrorHandling(apiRequest);
+        var dto = JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(response.Content ?? string.Empty);
+
+        return dto?.Compositions ?? new List<CompositionDto>();
     }
 
     private static PollingEventResponse<DateMemory, SearchCompositionsResponse> CreateSuccessResponse(
