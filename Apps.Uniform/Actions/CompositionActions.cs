@@ -170,10 +170,10 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         var memoryStream = new MemoryStream();
         await fileStream.CopyToAsync(memoryStream);
         memoryStream.Position = 0;
-        
+
         var fileBytes = await memoryStream.GetByteData();
         var html = Encoding.UTF8.GetString(fileBytes);
-        
+
         // Handle XLIFF format if provided
         if (Xliff2Serializer.IsXliff2(html))
         {
@@ -183,51 +183,60 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
                 throw new PluginMisconfigurationException("XLIFF did not contain any files");
             }
         }
-        
+
         var (compositionId, originalLocale) = HtmlToCompositionConverter.ExtractMetadata(html);
         if (string.IsNullOrEmpty(compositionId))
         {
             throw new PluginApplicationException("Invalid HTML: Composition ID not found in metadata");
         }
-        
+
         // Get the original composition to extract state
         var compositionRequest = new RestRequest("/api/v1/canvas");
+
         compositionRequest.AddQueryParameter("compositionId", compositionId);
-        var originalState = request.State ?? "0";
-        if (!string.IsNullOrEmpty(originalState))
-        {
-            compositionRequest.AddQueryParameter("state", originalState);
-        }
-        
+
+        var originalStateString = request.State ?? "0";
+        if (!int.TryParse(originalStateString, out var originalState))
+            originalState = 0;
+
+        compositionRequest.AddQueryParameter("state", originalState.ToString());
+
         var compositionResponse = await Client.ExecuteWithErrorHandling(compositionRequest);
         var compositionDto = JsonConvert.DeserializeObject<CompositionDetailsDto>(compositionResponse.Content ?? string.Empty);
-        
+
         if (compositionDto == null)
         {
             throw new PluginApplicationException($"Composition with ID {compositionId} not found");
         }
-        
+
         // Get canvas definitions (needed for HtmlToCompositionConverter constructor)
         var canvasDefinitionsRequest = new RestRequest("/api/v1/canvas-definitions");
+
+        var projectId = GetProjectIdFromCreds();
+
+        canvasDefinitionsRequest.AddQueryParameter("projectId", projectId);
+
         var canvasDefinitionsResponse = await Client.ExecuteWithErrorHandling<CanvasDefinitionsDto>(canvasDefinitionsRequest);
-        
+
         var localizableParameters = canvasDefinitionsResponse.ComponentDefinitions
             .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
             .ToList();
-        
+
         // Create a new composition object that will be populated from HTML
         var compositionData = new JObject();
-        
+
         // Update composition with translated content using the new converter logic
         var htmlConverter = new HtmlToCompositionConverter(localizableParameters);
         htmlConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
-        
+
         // Prepare the full composition object with the wrapper
-        var fullComposition = new JObject();
-        fullComposition.Add("compositionId", compositionId);
-        fullComposition.Add("state", originalState);
-        fullComposition.Add("composition", compositionData);
-        
+        var fullComposition = new JObject
+        {
+            ["projectId"] = projectId,
+            ["state"] = originalState,
+            ["composition"] = compositionData
+        };
+
         // Remove unnecessary fields that shouldn't be in update request
         compositionData.Remove("pattern");
         compositionData.Remove("patternType");
@@ -236,11 +245,26 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         compositionData.Remove("previewImageUrl");
         compositionData.Remove("editionId");
         compositionData.Remove("editionName");
-        
+
         // Send update request
         var updateRequest = new RestRequest("/api/v1/canvas", Method.Put);
-        updateRequest.AddJsonBody(fullComposition.ToString());
-        
+
+        updateRequest.AddQueryParameter("compositionId", compositionId);
+
+        updateRequest.AddStringBody(fullComposition.ToString(Formatting.None), DataFormat.Json);
+
         await Client.ExecuteWithErrorHandling(updateRequest);
+    }
+
+    private string GetProjectIdFromCreds()
+    {
+        var projectId = InvocationContext.AuthenticationCredentialsProviders
+            .FirstOrDefault(x => x.KeyName == "project_id")
+            ?.Value;
+
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new PluginMisconfigurationException("Missing 'project_id' in connection credentials.");
+
+        return projectId;
     }
 }
