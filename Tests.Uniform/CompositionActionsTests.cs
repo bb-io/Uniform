@@ -128,11 +128,11 @@ public class CompositionActionsTests : TestBase
         {
             Content = new()
             {
-                Name = "Dynamic Jira Template_en-US.html",
+                Name = "Test static composition_en-US_fr-FR.html",
                 ContentType = "text/html",
             },
             Locale = "fr-FR",
-            State = "0"
+            //CompositionId = ""
         };
         
         // Act & Assert (should not throw)
