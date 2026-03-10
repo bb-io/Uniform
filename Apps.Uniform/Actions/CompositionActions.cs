@@ -210,7 +210,9 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
             .ToList();
 
-        var compositionData = new JObject();
+        var rawResponse = JObject.Parse(compositionResponse.Content ?? "{}");
+        var compositionData = rawResponse["composition"] as JObject ?? new JObject();
+
         var htmlConverter = new HtmlToCompositionConverter(localizableParameters);
         htmlConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
 

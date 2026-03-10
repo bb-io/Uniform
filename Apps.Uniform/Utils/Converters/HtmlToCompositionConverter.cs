@@ -40,20 +40,21 @@ public class HtmlToCompositionConverter
             throw new Exception("Invalid HTML: Body element not found");
         }
         
-        // Extract original JSON from body attribute
-        var originalJsonEncoded = body.GetAttributeValue("data-original-json", "");
-        if (string.IsNullOrEmpty(originalJsonEncoded))
+        if (!compositionData.HasValues)
         {
-            throw new Exception("Invalid HTML: Original JSON not found in body attribute");
-        }
-        
-        var originalJson = HttpUtility.HtmlDecode(originalJsonEncoded);
-        var originalComposition = JObject.Parse(originalJson);
-        
-        // Copy the original composition structure to compositionData
-        foreach (var prop in originalComposition.Properties())
-        {
-            compositionData[prop.Name] = prop.Value.DeepClone();
+            var originalJsonEncoded = body.GetAttributeValue("data-original-json", "");
+            if (string.IsNullOrEmpty(originalJsonEncoded))
+            {
+                throw new Exception("Invalid HTML: Original JSON not found in body attribute");
+            }
+
+            var originalJson = HttpUtility.HtmlDecode(originalJsonEncoded);
+            var originalComposition = JObject.Parse(originalJson);
+
+            foreach (var prop in originalComposition.Properties())
+            {
+                compositionData[prop.Name] = prop.Value.DeepClone();
+            }
         }
         
         // Now update with translated values using json-path
