@@ -6,12 +6,12 @@
         <Nullable>enable</Nullable>
         <Product>Uniform [Beta]</Product>
         <Description>Uniform is a composable Digital Experience Platform (DXP) designed for enterprise digital marketing teams. It allows users to create omnichannel digital experiences by integrating various content, data, and technology sources.</Description>
-        <Version>1.0.6</Version>
+        <Version>1.0.7</Version>
         <AssemblyName>Apps.Uniform</AssemblyName>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Blackbird.Applications.SDK.Blueprints" Version="1.0.1" />
+        <PackageReference Include="Blackbird.Applications.SDK.Blueprints" Version="1.0.2" />
         <PackageReference Include="Blackbird.Applications.Sdk.Utils" Version="1.0.25" />
         <PackageReference Include="Blackbird.Filters" Version="1.1.35" />
     </ItemGroup>
