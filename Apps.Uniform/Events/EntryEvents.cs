@@ -15,7 +15,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
     private const int PageLimit = 150;
     
     [PollingEvent("On entries created", Description = "Polling event that periodically checks for newly created entries")]
-    public async Task<PollingEventResponse<DateMemory, SearchEntriesResponse>> OnEntriesCreatedAsync(
+    public async Task<PollingEventResponse<DateMemory, PollingSearchEntriesResponse>> OnEntriesCreatedAsync(
         PollingEventRequest<DateMemory> request,
         [PollingEventParameter] EntryFilters filters)
     {
@@ -27,7 +27,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
     }
 
     [PollingEvent("On entries updated", Description = "Polling event that periodically checks for updated entries")]
-    public async Task<PollingEventResponse<DateMemory, SearchEntriesResponse>> OnEntriesUpdatedAsync(
+    public async Task<PollingEventResponse<DateMemory, PollingSearchEntriesResponse>> OnEntriesUpdatedAsync(
         PollingEventRequest<DateMemory> request,
         [PollingEventParameter] EntryFilters filters)
     {
@@ -40,7 +40,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
 
     [PollingEvent("On entries published", Description = "Polling event that periodically checks for newly published or updated published entries")]
     [BlueprintEventDefinition(BlueprintEvent.ContentCreatedOrUpdatedMultiple)]
-    public async Task<PollingEventResponse<DateMemory, SearchEntriesResponse>> OnEntriesPublishedAsync(
+    public async Task<PollingEventResponse<DateMemory, PollingSearchEntriesResponse>> OnEntriesPublishedAsync(
         PollingEventRequest<DateMemory> request)
     {
         if (request.Memory == null)
@@ -48,13 +48,14 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
             return CreateInitialResponse();
         }
 
-        var allPublishedEntries = new List<EntryResponse>();
+        var allPublishedEntries = new List<PollingEntryResponse>();
 
         // Check for newly created published entries
         var createdEntries = await FetchEntriesAsync("64", "created_at_DESC");
         var newPublishedEntries = createdEntries
             .Where(e => e.CreatedAt > request.Memory.LastPollingTime)
             .Select(e => e.Data)
+            .Select(x => new PollingEntryResponse(x))
             .ToList();
         allPublishedEntries.AddRange(newPublishedEntries);
 
@@ -63,19 +64,20 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
         var updatedPublishedEntries = updatedEntries
             .Where(e => e.UpdatedAt.HasValue && e.UpdatedAt.Value > request.Memory.LastPollingTime)
             .Select(e => e.Data)
+            .Select(x => new PollingEntryResponse(x))
             .ToList();
         allPublishedEntries.AddRange(updatedPublishedEntries);
 
         // Remove duplicates
         var distinctEntries = allPublishedEntries
-            .GroupBy(e => e.Id)
+            .GroupBy(e => e.ContentId)
             .Select(g => g.First())
             .ToList();
 
         return CreateSuccessResponse(distinctEntries);
     }
 
-    private async Task<PollingEventResponse<DateMemory, SearchEntriesResponse>> ProcessPollingRequestAsync(
+    private async Task<PollingEventResponse<DateMemory, PollingSearchEntriesResponse>> ProcessPollingRequestAsync(
         PollingEventRequest<DateMemory> request,
         string state,
         string orderBy,
@@ -90,6 +92,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
         var filteredEntries = entries
             .Where(filter)
             .Select(e => e.Data)
+            .Select(x => new PollingEntryResponse(x))
             .ToList();
 
         return CreateSuccessResponse(filteredEntries);
@@ -109,7 +112,7 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
         return entriesDto?.Entries ?? new List<EntryDto>();
     }
 
-    private static PollingEventResponse<DateMemory, SearchEntriesResponse> CreateInitialResponse()
+    private static PollingEventResponse<DateMemory, PollingSearchEntriesResponse> CreateInitialResponse()
     {
         return new()
         {
@@ -122,16 +125,12 @@ public class EntryEvents(InvocationContext invocationContext) : Invocable(invoca
         };
     }
 
-    private static PollingEventResponse<DateMemory, SearchEntriesResponse> CreateSuccessResponse(
-        List<EntryResponse> entries)
+    private static PollingEventResponse<DateMemory, PollingSearchEntriesResponse> CreateSuccessResponse(
+        List<PollingEntryResponse> entries)
     {
         return new()
         {
-            Result = new SearchEntriesResponse
-            {
-                Items = entries,
-                TotalCount = entries.Count
-            },
+            Result = new PollingSearchEntriesResponse(entries.ToList(), entries.Count),
             FlyBird = entries.Count > 0,
             Memory = new DateMemory
             {
