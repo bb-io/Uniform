@@ -142,12 +142,18 @@ public class CompositionToHtmlConverter
         return null;
     }
     
-    private HtmlNode CreateParameterDiv(HtmlDocument doc, ParameterDefinitionDto parameter, JToken value, string jsonPath)
+    private static HtmlNode CreateParameterDiv(HtmlDocument doc, ParameterDefinitionDto parameter, JToken value, string jsonPath)
     {
         var div = doc.CreateElement("div");
         div.SetAttributeValue("data-parameter-id", parameter.Id);
         div.SetAttributeValue("data-parameter-type", parameter.Type);
         div.SetAttributeValue("data-json-path", jsonPath);
+        
+        if (string.Equals(parameter.Type, "richText", StringComparison.OrdinalIgnoreCase))
+        {
+            div.InnerHtml = value is JObject o ? new RichTextToHtmlConverter(o).ToHtml() : string.Empty;
+            return div;
+        }
         
         var textValue = value.ToString();
         

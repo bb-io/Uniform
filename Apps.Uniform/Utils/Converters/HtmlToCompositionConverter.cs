@@ -64,10 +64,20 @@ public class HtmlToCompositionConverter
             foreach (var parameterDiv in parameterDivs)
             {
                 var jsonPath = parameterDiv.GetAttributeValue("data-json-path", "");
-                if (string.IsNullOrEmpty(jsonPath)) continue;
-                
+                if (string.IsNullOrEmpty(jsonPath)) 
+                    continue;
+
+                string parameterType = parameterDiv.GetAttributeValue("data-parameter-type", "");
+                if (string.Equals(parameterType, "richText", StringComparison.OrdinalIgnoreCase))
+                {
+                    var richText = new HtmlToRichTextConverter().ToRichText(parameterDiv.InnerHtml);
+                    UpdateValueByJsonPath(compositionData, jsonPath, richText, targetLocale);
+                    continue;
+                }
+
                 var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
-                if (textNode == null) continue;
+                if (textNode == null) 
+                    continue;
                 
                 var translatedText = HttpUtility.HtmlDecode(textNode.InnerText);
                 
@@ -90,7 +100,7 @@ public class HtmlToCompositionConverter
         }
     }
     
-    private void UpdateValueByJsonPath(JObject compositionData, string jsonPath, string value, string targetLocale)
+    private void UpdateValueByJsonPath(JObject compositionData, string jsonPath, JToken value, string targetLocale)
     {
         // Parse the json-path (format: "parameters.text.locales.en-US" or "slots.component[0].parameters.text.locales.en-US")
         var pathParts = new List<string>();
