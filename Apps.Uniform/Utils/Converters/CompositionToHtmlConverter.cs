@@ -149,10 +149,9 @@ public class CompositionToHtmlConverter
         div.SetAttributeValue("data-parameter-type", parameter.Type);
         div.SetAttributeValue("data-json-path", jsonPath);
         
-        if (value.Type == JTokenType.Object)
+        if (string.Equals(parameter.Type, "richText", StringComparison.OrdinalIgnoreCase))
         {
-            var richTextConverter = new RichTextToHtmlConverter(value as JObject ?? new JObject());
-            div.InnerHtml = richTextConverter.ToHtml();
+            div.InnerHtml = value is JObject o ? new RichTextToHtmlConverter(o).ToHtml() : string.Empty;
             return div;
         }
         
