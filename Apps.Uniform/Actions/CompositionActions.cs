@@ -9,7 +9,6 @@ using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
 using Newtonsoft.Json;
 using RestSharp;
-using Apps.Uniform.Models.Dtos.Canvas;
 using Apps.Uniform.Utils.Converters;
 using System.Net.Mime;
 using System.Text;
@@ -136,20 +135,11 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         }
         
         var composition = compositionDto.Data;
-        
-        // Get canvas definitions to determine which parameters are localizable
-        var canvasDefinitionsRequest = new RestRequest("/api/v1/canvas-definitions");
-        var canvasDefinitionsResponse = await Client.ExecuteWithErrorHandling<CanvasDefinitionsDto>(canvasDefinitionsRequest);
-        
-        // Collect all localizable parameters from all component definitions
-        var localizableParameters = canvasDefinitionsResponse.ComponentDefinitions
-            .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
-            .ToList();
-        
+
         var compositionJson = JsonConvert.SerializeObject(composition);
         var compositionData = JObject.Parse(compositionJson);
-        
-        var converter = new CompositionToHtmlConverter(localizableParameters, request.Locale);
+
+        var converter = new CompositionToHtmlConverter(request.Locale);
         var html = converter.ToHtml(compositionData, composition.Id, composition.Name, compositionDto.State.ToString());
         
         var fileReference = await fileManagementClient.UploadAsync(
@@ -200,20 +190,12 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         if (compositionDto == null)
             throw new PluginApplicationException($"Composition with ID {compositionId} not found");
 
-        var canvasDefinitionsRequest = new RestRequest("/api/v1/canvas-definitions");
         var projectId = GetProjectIdFromCreds();
-        canvasDefinitionsRequest.AddQueryParameter("projectId", projectId);
-
-        var canvasDefinitionsResponse = await Client.ExecuteWithErrorHandling<CanvasDefinitionsDto>(canvasDefinitionsRequest);
-
-        var localizableParameters = canvasDefinitionsResponse.ComponentDefinitions
-            .SelectMany(cd => cd.Parameters.Where(p => p.Localizable))
-            .ToList();
 
         var rawResponse = JObject.Parse(compositionResponse.Content ?? "{}");
         var compositionData = rawResponse["composition"] as JObject ?? new JObject();
 
-        var htmlConverter = new HtmlToCompositionConverter(localizableParameters);
+        var htmlConverter = new HtmlToCompositionConverter();
         htmlConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
 
         if (compositionData["_id"] == null || string.IsNullOrWhiteSpace(compositionData["_id"]?.ToString()))

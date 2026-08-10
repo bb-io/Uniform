@@ -1,6 +1,4 @@
-using Apps.Uniform.Models.Dtos.Canvas;
 using HtmlAgilityPack;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Web;
 
@@ -8,38 +6,31 @@ namespace Apps.Uniform.Utils.Converters;
 
 public class HtmlToCompositionConverter
 {
-    private readonly List<ParameterDefinitionDto> _localizableParameters;
-    
-    public HtmlToCompositionConverter(List<ParameterDefinitionDto> localizableParameters)
-    {
-        _localizableParameters = localizableParameters;
-    }
-    
     public static (string compositionId, string locale) ExtractMetadata(string html)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
-        
+
         var compositionIdMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-composition-id']");
         var localeMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-locale']");
-        
+
         var compositionId = compositionIdMeta?.GetAttributeValue("content", "") ?? "";
         var locale = localeMeta?.GetAttributeValue("content", "") ?? "";
-        
+
         return (compositionId, locale);
     }
-    
+
     public void UpdateCompositionFromHtml(string html, JObject compositionData, string targetLocale)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
-        
+
         var body = doc.DocumentNode.SelectSingleNode("//body");
         if (body == null)
         {
             throw new Exception("Invalid HTML: Body element not found");
         }
-        
+
         if (!compositionData.HasValues)
         {
             var originalJsonEncoded = body.GetAttributeValue("data-original-json", "");
@@ -56,7 +47,7 @@ public class HtmlToCompositionConverter
                 compositionData[prop.Name] = prop.Value.DeepClone();
             }
         }
-        
+
         // Now update with translated values using json-path
         var parameterDivs = doc.DocumentNode.SelectNodes("//div[@data-json-path]");
         if (parameterDivs != null)
@@ -64,28 +55,37 @@ public class HtmlToCompositionConverter
             foreach (var parameterDiv in parameterDivs)
             {
                 var jsonPath = parameterDiv.GetAttributeValue("data-json-path", "");
-                if (string.IsNullOrEmpty(jsonPath)) 
+                if (string.IsNullOrEmpty(jsonPath))
                     continue;
 
-                string parameterType = parameterDiv.GetAttributeValue("data-parameter-type", "");
+                var parameterObject = ResolveParameterObject(compositionData, jsonPath);
+                if (parameterObject == null)
+                    continue; // Path not found, skip
+
+                // The composition itself is the source of truth for the parameter type. The attribute
+                // is only a fallback, files produced by older versions can carry an incorrect type.
+                var parameterType = parameterObject["type"]?.ToString();
+                if (string.IsNullOrEmpty(parameterType))
+                    parameterType = parameterDiv.GetAttributeValue("data-parameter-type", "");
+
+                JToken translatedValue;
                 if (string.Equals(parameterType, "richText", StringComparison.OrdinalIgnoreCase))
                 {
-                    var richText = new HtmlToRichTextConverter().ToRichText(parameterDiv.InnerHtml);
-                    UpdateValueByJsonPath(compositionData, jsonPath, richText, targetLocale);
-                    continue;
+                    translatedValue = new HtmlToRichTextConverter().ToRichText(parameterDiv.InnerHtml);
+                }
+                else
+                {
+                    var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
+                    if (textNode == null)
+                        continue;
+
+                    translatedValue = HttpUtility.HtmlDecode(textNode.InnerText);
                 }
 
-                var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
-                if (textNode == null) 
-                    continue;
-                
-                var translatedText = HttpUtility.HtmlDecode(textNode.InnerText);
-                
-                // Update the value at the json-path
-                UpdateValueByJsonPath(compositionData, jsonPath, translatedText, targetLocale);
+                SetLocaleValue(parameterObject, targetLocale, translatedValue);
             }
         }
-        
+
         // Ensure target locale is in _locales array
         var locales = compositionData["_locales"] as JArray;
         if (locales == null)
@@ -93,19 +93,67 @@ public class HtmlToCompositionConverter
             locales = new JArray();
             compositionData["_locales"] = locales;
         }
-        
+
         if (!locales.Any(l => l.ToString() == targetLocale))
         {
             locales.Add(targetLocale);
         }
     }
-    
-    private void UpdateValueByJsonPath(JObject compositionData, string jsonPath, JToken value, string targetLocale)
+
+    /// <summary>
+    /// Resolves the parameter object a json-path points at, e.g. "slots.content[0].parameters.title.locales.en-US"
+    /// resolves to the 'title' parameter object (the last two segments address the locale value itself).
+    /// </summary>
+    private static JObject? ResolveParameterObject(JObject compositionData, string jsonPath)
     {
-        // Parse the json-path (format: "parameters.text.locales.en-US" or "slots.component[0].parameters.text.locales.en-US")
+        var pathParts = ParseJsonPath(jsonPath);
+
+        JToken? current = compositionData;
+
+        // Navigate to the parent of the locale (stop before the last two parts: "locales" and locale code)
+        for (int i = 0; i < pathParts.Count - 2; i++)
+        {
+            var part = pathParts[i];
+
+            if (part.StartsWith("[") && part.EndsWith("]"))
+            {
+                // Array index
+                var index = int.Parse(part.Substring(1, part.Length - 2));
+                current = current?[index];
+            }
+            else
+            {
+                // Object property
+                current = current?[part];
+            }
+
+            if (current == null)
+            {
+                return null; // Path not found
+            }
+        }
+
+        return current as JObject;
+    }
+
+    private static void SetLocaleValue(JObject parameterObject, string targetLocale, JToken value)
+    {
+        var localesObj = parameterObject["locales"] as JObject;
+        if (localesObj == null)
+        {
+            // Create locales object if it doesn't exist
+            localesObj = new JObject();
+            parameterObject["locales"] = localesObj;
+        }
+
+        localesObj[targetLocale] = value;
+    }
+
+    private static List<string> ParseJsonPath(string jsonPath)
+    {
         var pathParts = new List<string>();
         var currentPart = "";
-        
+
         for (int i = 0; i < jsonPath.Length; i++)
         {
             var c = jsonPath[i];
@@ -133,48 +181,12 @@ public class HtmlToCompositionConverter
                 currentPart += c;
             }
         }
-        
+
         if (!string.IsNullOrEmpty(currentPart))
         {
             pathParts.Add(currentPart);
         }
-        
-        // Navigate to the target location
-        JToken? current = compositionData;
-        
-        // Navigate to the parent of the locale (stop before the last two parts: "locales" and locale code)
-        for (int i = 0; i < pathParts.Count - 2; i++)
-        {
-            var part = pathParts[i];
-            
-            if (part.StartsWith("[") && part.EndsWith("]"))
-            {
-                // Array index
-                var index = int.Parse(part.Substring(1, part.Length - 2));
-                current = current?[index];
-            }
-            else
-            {
-                // Object property
-                current = current?[part];
-            }
-            
-            if (current == null)
-            {
-                return; // Path not found, skip
-            }
-        }
-        
-        // Now we should be at the parameter object, and need to update locales
-        var localesObj = current["locales"] as JObject;
-        if (localesObj == null)
-        {
-            // Create locales object if it doesn't exist
-            localesObj = new JObject();
-            current["locales"] = localesObj;
-        }
-        
-        // Set the target locale value
-        localesObj[targetLocale] = value;
+
+        return pathParts;
     }
 }
