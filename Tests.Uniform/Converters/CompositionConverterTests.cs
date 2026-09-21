@@ -1,3 +1,4 @@
+using Apps.Uniform.Models.Dtos.Canvas;
 using Apps.Uniform.Utils.Converters;
 using Newtonsoft.Json.Linq;
 
@@ -91,7 +92,12 @@ public class CompositionConverterTests
                       "type": "card",
                       "parameters": {
                         "title": { "type": "text", "locales": { "en-US": "Collaborate" } },
-                        "description": { "type": "text", "locales": { "en-US": "Work together" } }
+                        "description": { "type": "text", "locales": { "en-US": "Work together" } },
+                        "headline": { "type": "text", "value": "Get started" },
+                        "label": { "type": "text", "value": "Internal card label" },
+                        "tagline": { "type": "text", "value": "" },
+                        "dynamicHeadline": { "type": "text", "value": "${#jptr:/Loop Item/content1/fields/heading}" },
+                        "variantName": { "type": "text", "locales": { "en-US": "heading:${#jptr:/Loop Item/content1/fields/heading}+subheading:${#jptr:/Loop Item/content2/fields/subheading}" } }
                       }
                     }
                   ]
@@ -102,8 +108,19 @@ public class CompositionConverterTests
         }
         """);
 
-    private static string ToHtml(JObject composition) =>
-        new CompositionToHtmlConverter(SourceLocale)
+    private static LocalizableParameterSet CreateDefinitions(params (string ComponentType, string ParameterId)[] localizableParameters) =>
+        new(localizableParameters
+            .GroupBy(parameter => parameter.ComponentType)
+            .Select(group => new ComponentDefinitionDto
+            {
+                Id = group.Key,
+                Parameters = group
+                    .Select(parameter => new ParameterDefinitionDto { Id = parameter.ParameterId, Localizable = true })
+                    .ToList()
+            }));
+
+    private static string ToHtml(JObject composition, LocalizableParameterSet? definitions = null) =>
+        new CompositionToHtmlConverter(SourceLocale, definitions ?? CreateDefinitions())
             .ToHtml(composition, composition["_id"]!.ToString(), composition["_name"]!.ToString(), "64");
 
     private static HtmlAgilityPack.HtmlNode SelectParameterDiv(string html, string jsonPath)
@@ -214,5 +231,67 @@ public class CompositionConverterTests
         var translated = composition["slots"]!["content"]![0]!["parameters"]!["title"]!["locales"]![TargetLocale] as JObject;
         Assert.IsNotNull(translated);
         Assert.AreEqual("Get your team on ", translated["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+    }
+
+    [TestMethod]
+    public void ToHtml_LocalizableParameterWithoutLocaleValue_ExportsAuthoredValue()
+    {
+        var html = ToHtml(CreateComposition(), CreateDefinitions(("card", "headline")));
+
+        var headline = SelectParameterDiv(html, "slots.content[0].slots.treatment[0].parameters.headline.locales.en-US");
+        Assert.AreEqual("<p>Get started</p>", headline.InnerHtml);
+    }
+
+    [TestMethod]
+    public void ToHtml_NonLocalizableParameterWithoutLocaleValue_IsSkipped()
+    {
+        var html = ToHtml(CreateComposition(), CreateDefinitions(("card", "headline")));
+
+        var doc = new HtmlAgilityPack.HtmlDocument();
+        doc.LoadHtml(html);
+
+        Assert.IsNull(doc.DocumentNode.SelectSingleNode("//div[@data-parameter-id='label']"));
+    }
+
+    [TestMethod]
+    public void ToHtml_ParameterLocalizableOnAnotherComponentType_IsSkipped()
+    {
+        var html = ToHtml(CreateComposition(), CreateDefinitions(("callToAction", "headline")));
+
+        var doc = new HtmlAgilityPack.HtmlDocument();
+        doc.LoadHtml(html);
+
+        Assert.IsNull(doc.DocumentNode.SelectSingleNode("//div[@data-parameter-id='headline']"));
+    }
+
+    [TestMethod]
+    public void ToHtml_ValuesWithoutTranslatableText_AreSkipped()
+    {
+        var html = ToHtml(CreateComposition(), CreateDefinitions(("card", "tagline"), ("card", "dynamicHeadline")));
+
+        var doc = new HtmlAgilityPack.HtmlDocument();
+        doc.LoadHtml(html);
+
+        Assert.IsNull(doc.DocumentNode.SelectSingleNode("//div[@data-parameter-id='tagline']"));
+        Assert.IsNull(doc.DocumentNode.SelectSingleNode("//div[@data-parameter-id='dynamicHeadline']"),
+            "A value that is a dynamic token expression is not translatable content");
+        Assert.IsNull(doc.DocumentNode.SelectSingleNode("//div[@data-parameter-id='variantName']"),
+            "A localized value made of dynamic token expressions is not translatable content either");
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_ParameterWithoutLocales_KeepsAuthoredValueAsSourceLocale()
+    {
+        var composition = CreateComposition();
+        var translatedHtml = ToHtml(composition, CreateDefinitions(("card", "headline")))
+            .Replace("<p>Get started</p>", "<p>Commencer</p>");
+
+        new HtmlToCompositionConverter().UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
+
+        var headline = (JObject)composition["slots"]!["content"]![0]!["slots"]!["treatment"]![0]!["parameters"]!["headline"]!;
+
+        Assert.IsNull(headline["value"], "The authored value must move into the locale map Uniform reads");
+        Assert.AreEqual("Get started", headline["locales"]![SourceLocale]!.ToString());
+        Assert.AreEqual("Commencer", headline["locales"]![TargetLocale]!.ToString());
     }
 }

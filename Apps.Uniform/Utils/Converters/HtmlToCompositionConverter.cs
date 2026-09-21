@@ -11,19 +11,18 @@ public class HtmlToCompositionConverter
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
-        var compositionIdMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-composition-id']");
-        var localeMeta = doc.DocumentNode.SelectSingleNode("//meta[@name='blackbird-locale']");
-
-        var compositionId = compositionIdMeta?.GetAttributeValue("content", "") ?? "";
-        var locale = localeMeta?.GetAttributeValue("content", "") ?? "";
-
-        return (compositionId, locale);
+        return (GetMetaContent(doc, "blackbird-composition-id"), GetMetaContent(doc, "blackbird-locale"));
     }
+
+    private static string GetMetaContent(HtmlDocument doc, string name) =>
+        doc.DocumentNode.SelectSingleNode($"//meta[@name='{name}']")?.GetAttributeValue("content", "") ?? "";
 
     public void UpdateCompositionFromHtml(string html, JObject compositionData, string targetLocale)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
+
+        var sourceLocale = GetMetaContent(doc, "blackbird-locale");
 
         var body = doc.DocumentNode.SelectSingleNode("//body");
         if (body == null)
@@ -82,7 +81,7 @@ public class HtmlToCompositionConverter
                     translatedValue = HttpUtility.HtmlDecode(textNode.InnerText);
                 }
 
-                SetLocaleValue(parameterObject, targetLocale, translatedValue);
+                SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
             }
         }
 
@@ -136,17 +135,22 @@ public class HtmlToCompositionConverter
         return current as JObject;
     }
 
-    private static void SetLocaleValue(JObject parameterObject, string targetLocale, JToken value)
+    private static void SetLocaleValue(JObject parameterObject, string sourceLocale, string targetLocale, JToken value)
     {
-        var localesObj = parameterObject["locales"] as JObject;
-        if (localesObj == null)
+        if (parameterObject["locales"] is not JObject locales)
         {
-            // Create locales object if it doesn't exist
-            localesObj = new JObject();
-            parameterObject["locales"] = localesObj;
+            locales = new JObject();
+
+            if (parameterObject["value"] is { } sourceValue && !string.IsNullOrEmpty(sourceLocale))
+            {
+                locales[sourceLocale] = sourceValue;
+            }
+
+            parameterObject.Remove("value");
+            parameterObject["locales"] = locales;
         }
 
-        localesObj[targetLocale] = value;
+        locales[targetLocale] = value;
     }
 
     private static List<string> ParseJsonPath(string jsonPath)

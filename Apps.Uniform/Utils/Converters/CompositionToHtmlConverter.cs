@@ -1,6 +1,7 @@
 using HtmlAgilityPack;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Text.RegularExpressions;
 using System.Web;
 
 namespace Apps.Uniform.Utils.Converters;
@@ -13,11 +14,15 @@ public class CompositionToHtmlConverter
     private static readonly HashSet<string> TranslatableParameterTypes =
         new(StringComparer.OrdinalIgnoreCase) { "text", "richText" };
 
-    private readonly string _locale;
+    private static readonly Regex DynamicTokenExpression = new(@"\$\{.+?\}", RegexOptions.Compiled);
 
-    public CompositionToHtmlConverter(string locale)
+    private readonly string _locale;
+    private readonly LocalizableParameterSet _localizableParameters;
+
+    public CompositionToHtmlConverter(string locale, LocalizableParameterSet localizableParameters)
     {
         _locale = locale;
+        _localizableParameters = localizableParameters;
     }
 
     public string ToHtml(JObject compositionData, string compositionId, string compositionName, string state)
@@ -46,19 +51,7 @@ public class CompositionToHtmlConverter
         compositionDiv.SetAttributeValue("data-composition-id", compositionId);
         body.AppendChild(compositionDiv);
 
-        // Process parameters
-        var parameters = compositionData["parameters"] as JObject;
-        if (parameters != null)
-        {
-            ProcessParameters(doc, compositionDiv, parameters, "parameters");
-        }
-
-        // Process slots recursively
-        var slots = compositionData["slots"] as JObject;
-        if (slots != null)
-        {
-            ProcessSlots(doc, compositionDiv, slots, "slots");
-        }
+        ProcessComponent(doc, compositionDiv, compositionData, string.Empty);
 
         return doc.DocumentNode.OuterHtml;
     }
@@ -71,7 +64,22 @@ public class CompositionToHtmlConverter
         head.AppendChild(meta);
     }
 
-    private void ProcessParameters(HtmlDocument doc, HtmlNode parentNode, JObject parameters, string basePath)
+    private void ProcessComponent(HtmlDocument doc, HtmlNode parentNode, JObject component, string basePath)
+    {
+        var componentType = component["type"]?.ToString();
+
+        if (component["parameters"] is JObject parameters)
+        {
+            ProcessParameters(doc, parentNode, componentType, parameters, $"{basePath}parameters");
+        }
+
+        if (component["slots"] is JObject slots)
+        {
+            ProcessSlots(doc, parentNode, slots, $"{basePath}slots");
+        }
+    }
+
+    private void ProcessParameters(HtmlDocument doc, HtmlNode parentNode, string? componentType, JObject parameters, string basePath)
     {
         foreach (var param in parameters)
         {
@@ -82,41 +90,41 @@ public class CompositionToHtmlConverter
             var parameterType = parameterData["type"]?.ToString();
             if (string.IsNullOrEmpty(parameterType) || !TranslatableParameterTypes.Contains(parameterType)) continue;
 
-            // Only localized values are translatable, the locale has to be present on the parameter
-            if (parameterData["locales"] is not JObject locales || !locales.TryGetValue(_locale, out var localeValue)) continue;
+            var sourceValue = ResolveSourceValue(parameterData, componentType, parameterId);
+            if (sourceValue == null) continue;
 
             var jsonPath = $"{basePath}.{parameterId}.locales.{_locale}";
-            parentNode.AppendChild(CreateParameterDiv(doc, parameterId, parameterType, localeValue, jsonPath));
+            var parameterDiv = CreateParameterDiv(doc, parameterId, parameterType, sourceValue, jsonPath);
+            if (!HasTranslatableText(parameterDiv.InnerText)) continue;
+
+            parentNode.AppendChild(parameterDiv);
         }
     }
+
+    private JToken? ResolveSourceValue(JObject parameterData, string? componentType, string parameterId)
+    {
+        if (parameterData["locales"] is JObject locales)
+        {
+            return locales.TryGetValue(_locale, out var localeValue) ? localeValue : null;
+        }
+
+        return _localizableParameters.Contains(componentType, parameterId) ? parameterData["value"] : null;
+    }
+
+    private static bool HasTranslatableText(string text) =>
+        !string.IsNullOrWhiteSpace(text) && !DynamicTokenExpression.IsMatch(text);
 
     private void ProcessSlots(HtmlDocument doc, HtmlNode parentNode, JObject slots, string basePath)
     {
         foreach (var slot in slots)
         {
-            var slotArray = slot.Value as JArray;
-            if (slotArray == null) continue;
+            if (slot.Value is not JArray slotArray) continue;
 
             for (int i = 0; i < slotArray.Count; i++)
             {
-                var componentObj = slotArray[i] as JObject;
-                if (componentObj == null) continue;
+                if (slotArray[i] is not JObject componentObj) continue;
 
-                var slotPath = $"{basePath}.{slot.Key}[{i}]";
-
-                // Process component parameters
-                var componentParameters = componentObj["parameters"] as JObject;
-                if (componentParameters != null)
-                {
-                    ProcessParameters(doc, parentNode, componentParameters, $"{slotPath}.parameters");
-                }
-
-                // Recursively process nested slots
-                var componentSlots = componentObj["slots"] as JObject;
-                if (componentSlots != null)
-                {
-                    ProcessSlots(doc, parentNode, componentSlots, $"{slotPath}.slots");
-                }
+                ProcessComponent(doc, parentNode, componentObj, $"{basePath}.{slot.Key}[{i}].");
             }
         }
     }

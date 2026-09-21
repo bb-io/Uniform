@@ -1,4 +1,5 @@
-﻿using Apps.Uniform.Models.Dtos.Compositions;
+﻿using Apps.Uniform.Models.Dtos.Canvas;
+using Apps.Uniform.Models.Dtos.Compositions;
 using Apps.Uniform.Models.Requests.Compositions;
 using Apps.Uniform.Models.Responses.Compositions;
 using Blackbird.Applications.Sdk.Common;
@@ -139,7 +140,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         var compositionJson = JsonConvert.SerializeObject(composition);
         var compositionData = JObject.Parse(compositionJson);
 
-        var converter = new CompositionToHtmlConverter(request.Locale);
+        var converter = new CompositionToHtmlConverter(request.Locale, await GetLocalizableParametersAsync());
         var html = converter.ToHtml(compositionData, composition.Id, composition.Name, compositionDto.State.ToString());
         
         var fileReference = await fileManagementClient.UploadAsync(
@@ -222,6 +223,15 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         updateRequest.AddStringBody(fullComposition.ToString(Formatting.None), DataFormat.Json);
 
         await Client.ExecuteWithErrorHandling(updateRequest);
+    }
+
+    private async Task<LocalizableParameterSet> GetLocalizableParametersAsync()
+    {
+        var definitionsRequest = new RestRequest("/api/v1/canvas-definitions");
+        var componentDefinitions = await Client.AutoPaginateAsync(definitionsRequest, content =>
+            JsonConvert.DeserializeObject<CanvasDefinitionsDto>(content)?.ComponentDefinitions ?? new List<ComponentDefinitionDto>());
+
+        return new LocalizableParameterSet(componentDefinitions);
     }
 
     private string GetProjectIdFromCreds()
