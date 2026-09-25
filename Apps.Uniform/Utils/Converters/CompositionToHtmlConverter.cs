@@ -68,9 +68,13 @@ public class CompositionToHtmlConverter
     {
         var componentType = component["type"]?.ToString();
 
-        if (component["parameters"] is JObject parameters)
+        var paramsKey = component["parameters"] != null ? "parameters"
+                      : component["fields"] != null ? "fields"
+                      : null;
+
+        if (paramsKey != null && component[paramsKey] is JObject parameters)
         {
-            ProcessParameters(doc, parentNode, componentType, parameters, $"{basePath}parameters");
+            ProcessParameters(doc, parentNode, componentType, parameters, $"{basePath}{paramsKey}");
         }
 
         if (component["slots"] is JObject slots)
@@ -84,11 +88,24 @@ public class CompositionToHtmlConverter
         foreach (var param in parameters)
         {
             var parameterId = param.Key;
-
             if (param.Value is not JObject parameterData) continue;
 
             var parameterType = parameterData["type"]?.ToString();
-            if (string.IsNullOrEmpty(parameterType) || !TranslatableParameterTypes.Contains(parameterType)) continue;
+            if (string.IsNullOrEmpty(parameterType)) continue;
+
+            if (parameterType == "$block" && parameterData["value"] is JArray blockItems)
+            {
+                for (int i = 0; i < blockItems.Count; i++)
+                {
+                    if (blockItems[i] is JObject item)
+                    {
+                        ProcessComponent(doc, parentNode, item, $"{basePath}.{parameterId}.value[{i}].");
+                    }
+                }
+                continue;
+            }
+
+            if (!TranslatableParameterTypes.Contains(parameterType)) continue;
 
             var sourceValue = ResolveSourceValue(parameterData, componentType, parameterId);
             if (sourceValue == null) continue;
