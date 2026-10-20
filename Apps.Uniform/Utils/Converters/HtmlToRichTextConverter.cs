@@ -192,7 +192,7 @@ public class HtmlToRichTextConverter
     
     private JObject CreateLinkNode(HtmlNode node)
     {
-        var href = node.GetAttributeValue("href", "");
+        var href = HttpUtility.HtmlDecode(node.GetAttributeValue("href", ""));
         
         var link = new JObject
         {

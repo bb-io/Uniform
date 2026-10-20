@@ -294,4 +294,16 @@ public class CompositionConverterTests
         Assert.AreEqual("Get started", headline["locales"]![SourceLocale]!.ToString());
         Assert.AreEqual("Commencer", headline["locales"]![TargetLocale]!.ToString());
     }
+
+    [TestMethod]
+    public void HtmlToRichText_LinkHrefWithAmpersand_IsDecoded()
+    {
+        const string href = "https://example.com?hosting=datacenter&tab=overview";
+        const string html = "<p><a href=\"https://example.com?hosting=datacenter&amp;tab=overview\">Overview</a></p>";
+
+        var richText = new HtmlToRichTextConverter().ToRichText(html);
+
+        var link = richText["root"]!["children"]![0]!["children"]![0]!;
+        Assert.AreEqual(href, link["link"]!["path"]!.ToString());
+    }
 }
