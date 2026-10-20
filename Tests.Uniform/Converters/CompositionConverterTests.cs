@@ -108,6 +108,104 @@ public class CompositionConverterTests
         }
         """);
 
+    private static JObject CreateResolvedPatternComposition(string bodyText) => JObject.Parse(
+        $$"""
+        {
+          "_id": "page-id",
+          "_name": "Pattern override reproduction",
+          "_locales": ["en-US"],
+          "type": "page",
+          "slots": {
+            "content": [
+              {
+                "_id": "instance-id",
+                "_pattern": "pattern-id",
+                "type": "richTextComponent",
+                "parameters": {
+                  "body": {
+                    "type": "richText",
+                    "locales": {
+                      "en-US": {
+                        "root": {
+                          "type": "root",
+                          "version": 1,
+                          "children": [
+                            {
+                              "type": "paragraph",
+                              "version": 1,
+                              "children": [
+                                { "type": "text", "version": 1, "text": "{{bodyText}}", "format": 0 }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """);
+
+    private static JObject CreateRawCompositionWithOverride() => JObject.Parse(
+        """
+        {
+          "_id": "page-id",
+          "_name": "Pattern override reproduction",
+          "_locales": ["en-US"],
+          "type": "page",
+          "slots": {
+            "content": [
+              {
+                "_id": "instance-id",
+                "_pattern": "pattern-id",
+                "type": "richTextComponent",
+                "_overridability": {
+                  "parameters": { "body": "yes" },
+                  "hideLockedParameters": true
+                }
+              }
+            ]
+          },
+          "_overrides": {
+            "instance-id": {
+              "parameters": {
+                "body": {
+                  "type": "richText",
+                  "locales": {
+                    "en-US": {
+                      "root": {
+                        "type": "root",
+                        "version": 1,
+                        "children": [
+                          {
+                            "type": "paragraph",
+                            "version": 1,
+                            "children": [
+                              { "type": "text", "version": 1, "text": "INSTANCE OVERRIDE — MUST SURVIVE", "format": 0 }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "unrelated-component-id": {
+              "parameters": {
+                "title": {
+                  "type": "text",
+                  "locales": { "en-US": "Untouched authored content" }
+                }
+              }
+            }
+          }
+        }
+        """);
+
     private static LocalizableParameterSet CreateDefinitions(params (string ComponentType, string ParameterId)[] localizableParameters) =>
         new(localizableParameters
             .GroupBy(parameter => parameter.ComponentType)
@@ -293,6 +391,92 @@ public class CompositionConverterTests
         Assert.IsNull(headline["value"], "The authored value must move into the locale map Uniform reads");
         Assert.AreEqual("Get started", headline["locales"]![SourceLocale]!.ToString());
         Assert.AreEqual("Commencer", headline["locales"]![TargetLocale]!.ToString());
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_PatternInstanceOverride_UpdatesRawOverrideInsteadOfSharedPattern()
+    {
+        var resolvedComposition = CreateResolvedPatternComposition("INSTANCE OVERRIDE — MUST SURVIVE");
+        var rawComposition = CreateRawCompositionWithOverride();
+        var unrelatedOverride = rawComposition["_overrides"]!["unrelated-component-id"]!.DeepClone();
+        var overridability = rawComposition["slots"]!["content"]![0]!["_overridability"]!.DeepClone();
+        var translatedHtml = ToHtml(resolvedComposition)
+            .Replace("<p>INSTANCE OVERRIDE — MUST SURVIVE</p>", "<p>REMPLACEMENT D’INSTANCE</p>");
+
+        var patternTranslations = HtmlToCompositionConverter.UpdateCompositionFromHtml(
+            translatedHtml,
+            resolvedComposition,
+            rawComposition,
+            TargetLocale);
+
+        Assert.AreEqual(0, patternTranslations.Count,
+            "An instance override must not be routed into the shared pattern");
+
+        var overrideParameter = rawComposition["_overrides"]!["instance-id"]!["parameters"]!["body"]!;
+        Assert.AreEqual("INSTANCE OVERRIDE — MUST SURVIVE",
+            overrideParameter["locales"]![SourceLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+        Assert.AreEqual("REMPLACEMENT D’INSTANCE",
+            overrideParameter["locales"]![TargetLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+        Assert.IsTrue(JToken.DeepEquals(
+            unrelatedOverride,
+            rawComposition["_overrides"]!["unrelated-component-id"]),
+            "Unrelated authored overrides must survive the write-back untouched");
+        Assert.IsNull(rawComposition["slots"]!["content"]![0]!["parameters"],
+            "Resolved pattern parameters must not be copied into the raw composition tree");
+        Assert.IsTrue(JToken.DeepEquals(
+            overridability,
+            rawComposition["slots"]!["content"]![0]!["_overridability"]),
+            "Pattern instance overridability metadata must survive the write-back");
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_PatternDefault_UpdatesRawPatternAndPreservesOverridability()
+    {
+        var resolvedComposition = CreateResolvedPatternComposition("PATTERN DEFAULT");
+        var rawComposition = JObject.Parse(
+            """
+            {
+              "_id": "page-id",
+              "_name": "Pattern reproduction",
+              "_locales": ["en-US"],
+              "type": "page",
+              "slots": {
+                "content": [
+                  { "_id": "instance-id", "_pattern": "pattern-id", "type": "richTextComponent" }
+                ]
+              }
+            }
+            """);
+        var translatedHtml = ToHtml(resolvedComposition)
+            .Replace("<p>PATTERN DEFAULT</p>", "<p>VALEUR PAR DÉFAUT</p>");
+
+        var patternTranslations = HtmlToCompositionConverter.UpdateCompositionFromHtml(
+            translatedHtml,
+            resolvedComposition,
+            rawComposition,
+            TargetLocale);
+
+        Assert.IsTrue(patternTranslations.TryGetValue("pattern-id", out var translations));
+        Assert.AreEqual(1, translations.Count);
+
+        var rawPattern = CreateResolvedPatternComposition("PATTERN DEFAULT");
+        rawPattern.Remove("slots");
+        rawPattern["_id"] = "pattern-id";
+        rawPattern["parameters"] = resolvedComposition["slots"]!["content"]![0]!["parameters"]!.DeepClone();
+        rawPattern["_overridability"] = JObject.Parse(
+            """{ "parameters": { "body": "yes" }, "slots": {} }""");
+        var overridability = rawPattern["_overridability"]!.DeepClone();
+
+        HtmlToCompositionConverter.UpdatePatternFromTranslations(
+            rawPattern,
+            translations,
+            SourceLocale,
+            TargetLocale);
+
+        Assert.AreEqual("VALEUR PAR DÉFAUT",
+            rawPattern["parameters"]!["body"]!["locales"]![TargetLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+        Assert.IsTrue(JToken.DeepEquals(overridability, rawPattern["_overridability"]),
+            "Updating a pattern must not remove its overridability metadata");
     }
 
     [TestMethod]
