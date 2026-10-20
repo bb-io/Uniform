@@ -188,7 +188,7 @@ public class CompositionConverterTests
             .Replace("<p>Get your team on <i>Confluence</i></p>", "<p>Réunissez votre équipe sur <i>Confluence</i></p>")
             .Replace("<h2>Collaborate</h2>", "<h2>Collaborez</h2>");
 
-        new HtmlToCompositionConverter().UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
 
         var titleLocales = composition["slots"]!["content"]![0]!["parameters"]!["title"]!["locales"]!;
 
@@ -226,7 +226,7 @@ public class CompositionConverterTests
             """<div data-parameter-id="title" data-parameter-type="richText" data-json-path="slots.content[0].parameters.title.locales.en-US">""",
             """<div data-parameter-id="title" data-parameter-type="text" data-json-path="slots.content[0].parameters.title.locales.en-US">""");
 
-        new HtmlToCompositionConverter().UpdateCompositionFromHtml(staleHtml, composition, TargetLocale);
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(staleHtml, composition, TargetLocale);
 
         var translated = composition["slots"]!["content"]![0]!["parameters"]!["title"]!["locales"]![TargetLocale] as JObject;
         Assert.IsNotNull(translated);
@@ -286,7 +286,7 @@ public class CompositionConverterTests
         var translatedHtml = ToHtml(composition, CreateDefinitions(("card", "headline")))
             .Replace("<p>Get started</p>", "<p>Commencer</p>");
 
-        new HtmlToCompositionConverter().UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
 
         var headline = (JObject)composition["slots"]!["content"]![0]!["slots"]!["treatment"]![0]!["parameters"]!["headline"]!;
 

@@ -158,11 +158,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
     public async Task UploadComposition([ActionParameter] UploadCompositionRequest request)
     {
         var fileStream = await fileManagementClient.DownloadAsync(request.Content);
-        var memoryStream = new MemoryStream();
-        await fileStream.CopyToAsync(memoryStream);
-        memoryStream.Position = 0;
-
-        var fileBytes = await memoryStream.GetByteData();
+        var fileBytes = await fileStream.GetByteData();
         var html = Encoding.UTF8.GetString(fileBytes);
 
         if (Xliff2Serializer.IsXliff2(html))
@@ -177,29 +173,14 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             throw new PluginApplicationException("Invalid HTML: Composition ID not found in metadata");
 
         // Get the original composition to extract state
-        var compositionRequest = new RestRequest("/api/v1/canvas");
-        compositionRequest.AddQueryParameter("compositionId", compositionId);
+        int originalState = int.TryParse(request.State, out var state) ? state : 0;
+        
+        var envelope = await GetCompositionEnvelope(compositionId, originalState);
+        var compositionData = envelope["composition"] as JObject ?? new JObject();
 
-        var originalStateString = request.State ?? "0";
-        if (!int.TryParse(originalStateString, out var originalState))
-            originalState = 0;
+        var patternTranslations = HtmlToCompositionConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
 
-        compositionRequest.AddQueryParameter("state", originalState.ToString());
-
-        var compositionResponse = await Client.ExecuteWithErrorHandling(compositionRequest);
-        var compositionDto = JsonConvert.DeserializeObject<CompositionDetailsDto>(compositionResponse.Content ?? string.Empty);
-        if (compositionDto == null)
-            throw new PluginApplicationException($"Composition with ID {compositionId} not found");
-
-        var projectId = GetProjectIdFromCreds();
-
-        var rawResponse = JObject.Parse(compositionResponse.Content ?? "{}");
-        var compositionData = rawResponse["composition"] as JObject ?? new JObject();
-
-        var htmlConverter = new HtmlToCompositionConverter();
-        htmlConverter.UpdateCompositionFromHtml(html, compositionData, request.Locale);
-
-        if (compositionData["_id"] == null || string.IsNullOrWhiteSpace(compositionData["_id"]?.ToString()))
+        if (string.IsNullOrWhiteSpace(compositionData["_id"]?.ToString()))
             compositionData["_id"] = compositionId;
 
         // Remove unnecessary fields that shouldn't be in update request
@@ -211,18 +192,40 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         compositionData.Remove("editionId");
         compositionData.Remove("editionName");
 
-        var fullComposition = new JObject
+        await PutComposition(new JObject { ["composition"] = compositionData }, originalState);
+
+        foreach (var (patternId, translations) in patternTranslations)
         {
-            ["projectId"] = projectId,
-            ["state"] = originalState,
-            ["composition"] = compositionData
-        };
+            var patternEnvelope = await GetCompositionEnvelope(patternId, originalState);
+            if (patternEnvelope["composition"] is not JObject patternData)
+                throw new PluginMisconfigurationException($"Pattern with ID {patternId} not found");
 
-        var updateRequest = new RestRequest("/api/v1/canvas", Method.Put);
+            HtmlToCompositionConverter.UpdatePatternFromTranslations(patternData, translations, originalLocale, request.Locale);
+            await PutComposition(patternEnvelope, originalState);
+        }
+    }
+    
+    private async Task<JObject> GetCompositionEnvelope(string compositionId, int state)
+    {
+        var request = new RestRequest("/api/v1/canvas")
+            .AddQueryParameter("compositionId", compositionId)
+            .AddQueryParameter("state", state.ToString());
 
-        updateRequest.AddStringBody(fullComposition.ToString(Formatting.None), DataFormat.Json);
+        var response = await Client.ExecuteWithErrorHandling(request);
+        return string.IsNullOrWhiteSpace(response.Content) 
+            ? throw new PluginApplicationException($"Composition with ID {compositionId} not found") 
+            : JObject.Parse(response.Content);
+    }
 
-        await Client.ExecuteWithErrorHandling(updateRequest);
+    private Task<RestResponse> PutComposition(JObject body, int state)
+    {
+        body["projectId"] = GetProjectIdFromCreds();
+        body["state"] = state;
+
+        var request = new RestRequest("/api/v1/canvas", Method.Put)
+            .AddStringBody(body.ToString(Formatting.None), DataFormat.Json);
+
+        return Client.ExecuteWithErrorHandling(request);
     }
 
     private async Task<LocalizableParameterSet> GetLocalizableParametersAsync()
