@@ -217,9 +217,10 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
 
         if (raw)
         {
+            // The client already targets Uniform's origin API. skipDataResolution is an SDK-only
+            // switch used to choose that host and is rejected by the REST endpoint as a query field.
             request
                 .AddQueryParameter("editions", "raw")
-                .AddQueryParameter("skipDataResolution", "true")
                 .AddQueryParameter("skipPatternResolution", "true")
                 .AddQueryParameter("skipOverridesResolution", "true");
         }
