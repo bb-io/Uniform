@@ -149,6 +149,12 @@ public class HtmlToRichTextConverter
                     case "a":
                         children.Add(CreateLinkNode(child));
                         break;
+                    case "ul":
+                        children.Add(CreateListNode(child, "bullet"));
+                        break;
+                    case "ol":
+                        children.Add(CreateListNode(child, "number"));
+                        break;
                     case "strong":
                     case "b":
                     case "i":
@@ -250,7 +256,7 @@ public class HtmlToRichTextConverter
         };
         
         var children = list["children"] as JArray;
-        foreach (var li in node.SelectNodes(".//li") ?? Enumerable.Empty<HtmlNode>())
+        foreach (var li in node.SelectNodes("./li") ?? Enumerable.Empty<HtmlNode>())
         {
             var listItem = CreateListItemNode(li);
             if (listItem != null)

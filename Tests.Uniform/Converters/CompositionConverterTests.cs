@@ -306,4 +306,55 @@ public class CompositionConverterTests
         var link = richText["root"]!["children"]![0]!["children"]![0]!;
         Assert.AreEqual(href, link["link"]!["path"]!.ToString());
     }
+
+    [TestMethod]
+    public void HtmlToRichText_NestedList_PreservesListHierarchy()
+    {
+        const string html = "<ul><li>Parent item<ul><li>Link one</li><li>Link two</li><li>Link three</li></ul></li></ul>";
+
+        var richText = new HtmlToRichTextConverter().ToRichText(html);
+
+        var rootChildren = (JArray)richText["root"]!["children"]!;
+        Assert.AreEqual(1, rootChildren.Count);
+
+        var outerListItems = (JArray)rootChildren[0]!["children"]!;
+        Assert.AreEqual(1, outerListItems.Count, "Only direct li elements should belong to the outer list");
+
+        var parentChildren = (JArray)outerListItems[0]!["children"]!;
+        Assert.AreEqual("text", parentChildren[0]!["type"]!.ToString());
+        Assert.AreEqual("list", parentChildren[1]!["type"]!.ToString());
+
+        var nestedListItems = (JArray)parentChildren[1]!["children"]!;
+        Assert.AreEqual(3, nestedListItems.Count);
+    }
+
+    [TestMethod]
+    public void HtmlToRichText_NestedListLinks_AreNotDuplicated()
+    {
+        const string html = "<ul><li>Parent item<ul>" +
+                            "<li><a href=\"https://example.com/one\">Link one</a></li>" +
+                            "<li><a href=\"https://example.com/two\">Link two</a></li>" +
+                            "<li><a href=\"https://example.com/three\">Link three</a></li>" +
+                            "</ul></li></ul>";
+
+        var richText = new HtmlToRichTextConverter().ToRichText(html);
+
+        var links = richText.Descendants()
+            .OfType<JObject>()
+            .Where(node => node["type"]?.ToString() == "link")
+            .ToList();
+
+        Assert.AreEqual(3, links.Count);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "https://example.com/one",
+                "https://example.com/two",
+                "https://example.com/three"
+            },
+            links.Select(link => link["link"]!["path"]!.ToString()).ToArray());
+
+        Assert.AreEqual(html, new RichTextToHtmlConverter(richText).ToHtml(),
+            "The nested list structure and links should survive the complete round trip");
+    }
 }
