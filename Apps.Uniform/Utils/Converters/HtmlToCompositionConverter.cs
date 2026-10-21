@@ -1,10 +1,13 @@
 using HtmlAgilityPack;
 using Newtonsoft.Json.Linq;
 using System.Web;
+using Apps.Uniform.Extensions;
+using Apps.Uniform.Utils.Converters.Models;
+using Blackbird.Applications.Sdk.Common.Exceptions;
 
 namespace Apps.Uniform.Utils.Converters;
 
-public class HtmlToCompositionConverter
+public static class HtmlToCompositionConverter
 {
     public static (string compositionId, string locale) ExtractMetadata(string html)
     {
@@ -17,37 +20,47 @@ public class HtmlToCompositionConverter
     private static string GetMetaContent(HtmlDocument doc, string name) =>
         doc.DocumentNode.SelectSingleNode($"//meta[@name='{name}']")?.GetAttributeValue("content", "") ?? "";
 
-    public void UpdateCompositionFromHtml(string html, JObject compositionData, string targetLocale)
+    public static Dictionary<string, List<PatternTranslation>> UpdateCompositionFromHtml(
+        string html, 
+        JObject compositionData,
+        string targetLocale)
+        => UpdateCompositionFromHtml(html, compositionData, compositionData, targetLocale);
+
+    public static Dictionary<string, List<PatternTranslation>> UpdateCompositionFromHtml(
+        string html,
+        JObject resolvedCompositionData,
+        JObject rawCompositionData,
+        string targetLocale)
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
         var sourceLocale = GetMetaContent(doc, "blackbird-locale");
 
-        var body = doc.DocumentNode.SelectSingleNode("//body");
-        if (body == null)
-        {
-            throw new Exception("Invalid HTML: Body element not found");
-        }
+        var body = doc.DocumentNode.SelectSingleNode("//body") ?? 
+                   throw new PluginMisconfigurationException("Invalid HTML: Body element not found");
 
-        if (!compositionData.HasValues)
+        if (!resolvedCompositionData.HasValues)
         {
             var originalJsonEncoded = body.GetAttributeValue("data-original-json", "");
             if (string.IsNullOrEmpty(originalJsonEncoded))
-            {
-                throw new Exception("Invalid HTML: Original JSON not found in body attribute");
-            }
+                throw new PluginMisconfigurationException("Invalid HTML: Original JSON not found in body attribute");
 
             var originalJson = HttpUtility.HtmlDecode(originalJsonEncoded);
             var originalComposition = JObject.Parse(originalJson);
 
             foreach (var prop in originalComposition.Properties())
-            {
-                compositionData[prop.Name] = prop.Value.DeepClone();
-            }
+                resolvedCompositionData[prop.Name] = prop.Value.DeepClone();
         }
 
-        // Now update with translated values using json-path
+        if (!rawCompositionData.HasValues)
+        {
+            foreach (var prop in resolvedCompositionData.Properties())
+                rawCompositionData[prop.Name] = prop.Value.DeepClone();
+        }
+
+        var patternTranslations = new Dictionary<string, List<PatternTranslation>>();
+
         var parameterDivs = doc.DocumentNode.SelectNodes("//div[@data-json-path]");
         if (parameterDivs != null)
         {
@@ -57,80 +70,152 @@ public class HtmlToCompositionConverter
                 if (string.IsNullOrEmpty(jsonPath))
                     continue;
 
-                var parameterObject = ResolveParameterObject(compositionData, jsonPath);
-                if (parameterObject == null)
-                    continue; // Path not found, skip
+                var pathParts = ParseJsonPath(jsonPath);
 
-                // The composition itself is the source of truth for the parameter type. The attribute
-                // is only a fallback, files produced by older versions can carry an incorrect type.
-                var parameterType = parameterObject["type"]?.ToString();
-                if (string.IsNullOrEmpty(parameterType))
-                    parameterType = parameterDiv.GetAttributeValue("data-parameter-type", "");
-
-                JToken translatedValue;
-                if (string.Equals(parameterType, "richText", StringComparison.OrdinalIgnoreCase))
+                // Pattern resolution makes an instance override look like an ordinary parameter.
+                // Route it back to its canonical _overrides entry before considering the shared pattern.
+                var overrideParameter = ResolveOverrideParameter(
+                    resolvedCompositionData,
+                    rawCompositionData,
+                    pathParts);
+                if (overrideParameter != null)
                 {
-                    translatedValue = new HtmlToRichTextConverter().ToRichText(parameterDiv.InnerHtml);
-                }
-                else
-                {
-                    var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
-                    if (textNode == null)
-                        continue;
-
-                    translatedValue = HttpUtility.HtmlDecode(textNode.InnerText);
+                    ApplyTranslation(overrideParameter, parameterDiv, sourceLocale, targetLocale);
+                    continue;
                 }
 
-                SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
+                var (patternId, relativeParts) = FindOwningPattern(resolvedCompositionData, pathParts);
+                if (patternId != null)
+                {
+                    if (!patternTranslations.TryGetValue(patternId, out var translations))
+                        patternTranslations[patternId] = translations = new List<PatternTranslation>();
+
+                    translations.Add(new PatternTranslation(relativeParts, parameterDiv));
+                    continue;
+                }
+
+                ApplyTranslation(rawCompositionData, pathParts, parameterDiv, sourceLocale, targetLocale);
             }
         }
 
-        // Ensure target locale is in _locales array
-        var locales = compositionData["_locales"] as JArray;
-        if (locales == null)
-        {
-            locales = new JArray();
-            compositionData["_locales"] = locales;
-        }
+        EnsureTargetLocale(rawCompositionData, targetLocale);
 
-        if (!locales.Any(l => l.ToString() == targetLocale))
-        {
-            locales.Add(targetLocale);
-        }
+        return patternTranslations;
+    }
+    
+    public static void UpdatePatternFromTranslations(
+        JObject patternData,
+        IEnumerable<PatternTranslation> translations,
+        string sourceLocale,
+        string targetLocale)
+    {
+        foreach (var translation in translations)
+            ApplyTranslation(patternData, translation.PathParts, translation.ParameterDiv, sourceLocale, targetLocale);
+
+        if (patternData["_locales"] is JArray)
+            EnsureTargetLocale(patternData, targetLocale);
+    }
+    
+    private static void ApplyTranslation(
+        JObject root,
+        List<string> pathParts,
+        HtmlNode parameterDiv,
+        string sourceLocale,
+        string targetLocale)
+    {
+        var parameterObject = ResolveParameterObject(root, pathParts);
+        if (parameterObject == null)
+            return; // Path not found, skip
+
+        ApplyTranslation(parameterObject, parameterDiv, sourceLocale, targetLocale);
     }
 
-    /// <summary>
-    /// Resolves the parameter object a json-path points at, e.g. "slots.content[0].parameters.title.locales.en-US"
-    /// resolves to the 'title' parameter object (the last two segments address the locale value itself).
-    /// </summary>
-    private static JObject? ResolveParameterObject(JObject compositionData, string jsonPath)
+    private static void ApplyTranslation(
+        JObject parameterObject,
+        HtmlNode parameterDiv,
+        string sourceLocale,
+        string targetLocale)
     {
-        var pathParts = ParseJsonPath(jsonPath);
+        var parameterType = parameterObject["type"]?.ToString();
+        if (string.IsNullOrEmpty(parameterType))
+            parameterType = parameterDiv.GetAttributeValue("data-parameter-type", "");
 
-        JToken? current = compositionData;
-
-        // Navigate to the parent of the locale (stop before the last two parts: "locales" and locale code)
-        for (int i = 0; i < pathParts.Count - 2; i++)
+        JToken translatedValue;
+        if (string.Equals(parameterType, "richText", StringComparison.OrdinalIgnoreCase))
+            translatedValue = new HtmlToRichTextConverter().ToRichText(parameterDiv.InnerHtml);
+        else
         {
-            var part = pathParts[i];
+            var textNode = parameterDiv.SelectSingleNode(".//h1 | .//h2 | .//h3 | .//p");
+            if (textNode == null)
+                return;
 
-            if (part.StartsWith("[") && part.EndsWith("]"))
-            {
-                // Array index
-                var index = int.Parse(part.Substring(1, part.Length - 2));
-                current = current?[index];
-            }
-            else
-            {
-                // Object property
-                current = current?[part];
-            }
-
-            if (current == null)
-            {
-                return null; // Path not found
-            }
+            translatedValue = HttpUtility.HtmlDecode(textNode.InnerText);
         }
+
+        SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
+    }
+
+    private static JObject? ResolveOverrideParameter(
+        JObject resolvedCompositionData,
+        JObject rawCompositionData,
+        List<string> pathParts)
+    {
+        var parameterContainerIndex = pathParts.FindLastIndex(part => part is "parameters" or "fields");
+        if (parameterContainerIndex < 0 || parameterContainerIndex + 1 >= pathParts.Count)
+            return null;
+
+        JToken? owner = resolvedCompositionData;
+        for (var i = 0; i < parameterContainerIndex && owner != null; i++)
+            owner = owner.Step(pathParts[i]);
+
+        var componentId = owner?["_id"]?.ToString();
+        if (string.IsNullOrWhiteSpace(componentId))
+            return null;
+
+        var parameterContainer = pathParts[parameterContainerIndex];
+        var parameterId = pathParts[parameterContainerIndex + 1];
+
+        return rawCompositionData["_overrides"]?[componentId]?[parameterContainer]?[parameterId] as JObject;
+    }
+    
+    private static void EnsureTargetLocale(JObject root, string targetLocale)
+    {
+        if (root["_locales"] is not JArray locales)
+        {
+            locales = new JArray();
+            root["_locales"] = locales;
+        }
+
+        if (locales.All(l => l.ToString() != targetLocale))
+            locales.Add(targetLocale);
+    }
+    
+    private static (string? PatternId, List<string> RelativeParts) FindOwningPattern(JObject root, List<string> pathParts)
+    {
+        string? patternId = null;
+        var relativeStart = 0;
+        JToken? current = root;
+
+        for (var i = 0; i < pathParts.Count - 2 && current != null; i++)
+        {
+            current = current.Step(pathParts[i]);
+
+            if (current is not JObject node || node["_pattern"]?.ToString() is not { Length: > 0 } id) 
+                continue;
+            
+            patternId = id;
+            relativeStart = i + 1;
+        }
+
+        return (patternId, pathParts.Skip(relativeStart).ToList());
+    }
+    
+    private static JObject? ResolveParameterObject(JObject root, List<string> pathParts)
+    {
+        JToken? current = root;
+
+        for (var i = 0; i < pathParts.Count - 2 && current != null; i++)
+            current = current.Step(pathParts[i]);
 
         return current as JObject;
     }

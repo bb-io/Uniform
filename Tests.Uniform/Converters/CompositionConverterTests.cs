@@ -108,6 +108,104 @@ public class CompositionConverterTests
         }
         """);
 
+    private static JObject CreateResolvedPatternComposition(string bodyText) => JObject.Parse(
+        $$"""
+        {
+          "_id": "page-id",
+          "_name": "Pattern override reproduction",
+          "_locales": ["en-US"],
+          "type": "page",
+          "slots": {
+            "content": [
+              {
+                "_id": "instance-id",
+                "_pattern": "pattern-id",
+                "type": "richTextComponent",
+                "parameters": {
+                  "body": {
+                    "type": "richText",
+                    "locales": {
+                      "en-US": {
+                        "root": {
+                          "type": "root",
+                          "version": 1,
+                          "children": [
+                            {
+                              "type": "paragraph",
+                              "version": 1,
+                              "children": [
+                                { "type": "text", "version": 1, "text": "{{bodyText}}", "format": 0 }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """);
+
+    private static JObject CreateRawCompositionWithOverride() => JObject.Parse(
+        """
+        {
+          "_id": "page-id",
+          "_name": "Pattern override reproduction",
+          "_locales": ["en-US"],
+          "type": "page",
+          "slots": {
+            "content": [
+              {
+                "_id": "instance-id",
+                "_pattern": "pattern-id",
+                "type": "richTextComponent",
+                "_overridability": {
+                  "parameters": { "body": "yes" },
+                  "hideLockedParameters": true
+                }
+              }
+            ]
+          },
+          "_overrides": {
+            "instance-id": {
+              "parameters": {
+                "body": {
+                  "type": "richText",
+                  "locales": {
+                    "en-US": {
+                      "root": {
+                        "type": "root",
+                        "version": 1,
+                        "children": [
+                          {
+                            "type": "paragraph",
+                            "version": 1,
+                            "children": [
+                              { "type": "text", "version": 1, "text": "INSTANCE OVERRIDE — MUST SURVIVE", "format": 0 }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "unrelated-component-id": {
+              "parameters": {
+                "title": {
+                  "type": "text",
+                  "locales": { "en-US": "Untouched authored content" }
+                }
+              }
+            }
+          }
+        }
+        """);
+
     private static LocalizableParameterSet CreateDefinitions(params (string ComponentType, string ParameterId)[] localizableParameters) =>
         new(localizableParameters
             .GroupBy(parameter => parameter.ComponentType)
@@ -188,7 +286,7 @@ public class CompositionConverterTests
             .Replace("<p>Get your team on <i>Confluence</i></p>", "<p>Réunissez votre équipe sur <i>Confluence</i></p>")
             .Replace("<h2>Collaborate</h2>", "<h2>Collaborez</h2>");
 
-        new HtmlToCompositionConverter().UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
 
         var titleLocales = composition["slots"]!["content"]![0]!["parameters"]!["title"]!["locales"]!;
 
@@ -226,7 +324,7 @@ public class CompositionConverterTests
             """<div data-parameter-id="title" data-parameter-type="richText" data-json-path="slots.content[0].parameters.title.locales.en-US">""",
             """<div data-parameter-id="title" data-parameter-type="text" data-json-path="slots.content[0].parameters.title.locales.en-US">""");
 
-        new HtmlToCompositionConverter().UpdateCompositionFromHtml(staleHtml, composition, TargetLocale);
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(staleHtml, composition, TargetLocale);
 
         var translated = composition["slots"]!["content"]![0]!["parameters"]!["title"]!["locales"]![TargetLocale] as JObject;
         Assert.IsNotNull(translated);
@@ -286,12 +384,161 @@ public class CompositionConverterTests
         var translatedHtml = ToHtml(composition, CreateDefinitions(("card", "headline")))
             .Replace("<p>Get started</p>", "<p>Commencer</p>");
 
-        new HtmlToCompositionConverter().UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(translatedHtml, composition, TargetLocale);
 
         var headline = (JObject)composition["slots"]!["content"]![0]!["slots"]!["treatment"]![0]!["parameters"]!["headline"]!;
 
         Assert.IsNull(headline["value"], "The authored value must move into the locale map Uniform reads");
         Assert.AreEqual("Get started", headline["locales"]![SourceLocale]!.ToString());
         Assert.AreEqual("Commencer", headline["locales"]![TargetLocale]!.ToString());
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_PatternInstanceOverride_UpdatesRawOverrideInsteadOfSharedPattern()
+    {
+        var resolvedComposition = CreateResolvedPatternComposition("INSTANCE OVERRIDE — MUST SURVIVE");
+        var rawComposition = CreateRawCompositionWithOverride();
+        var unrelatedOverride = rawComposition["_overrides"]!["unrelated-component-id"]!.DeepClone();
+        var overridability = rawComposition["slots"]!["content"]![0]!["_overridability"]!.DeepClone();
+        var translatedHtml = ToHtml(resolvedComposition)
+            .Replace("<p>INSTANCE OVERRIDE — MUST SURVIVE</p>", "<p>REMPLACEMENT D’INSTANCE</p>");
+
+        var patternTranslations = HtmlToCompositionConverter.UpdateCompositionFromHtml(
+            translatedHtml,
+            resolvedComposition,
+            rawComposition,
+            TargetLocale);
+
+        Assert.AreEqual(0, patternTranslations.Count,
+            "An instance override must not be routed into the shared pattern");
+
+        var overrideParameter = rawComposition["_overrides"]!["instance-id"]!["parameters"]!["body"]!;
+        Assert.AreEqual("INSTANCE OVERRIDE — MUST SURVIVE",
+            overrideParameter["locales"]![SourceLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+        Assert.AreEqual("REMPLACEMENT D’INSTANCE",
+            overrideParameter["locales"]![TargetLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+        Assert.IsTrue(JToken.DeepEquals(
+            unrelatedOverride,
+            rawComposition["_overrides"]!["unrelated-component-id"]),
+            "Unrelated authored overrides must survive the write-back untouched");
+        Assert.IsNull(rawComposition["slots"]!["content"]![0]!["parameters"],
+            "Resolved pattern parameters must not be copied into the raw composition tree");
+        Assert.IsTrue(JToken.DeepEquals(
+            overridability,
+            rawComposition["slots"]!["content"]![0]!["_overridability"]),
+            "Pattern instance overridability metadata must survive the write-back");
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_PatternDefault_UpdatesRawPatternAndPreservesOverridability()
+    {
+        var resolvedComposition = CreateResolvedPatternComposition("PATTERN DEFAULT");
+        var rawComposition = JObject.Parse(
+            """
+            {
+              "_id": "page-id",
+              "_name": "Pattern reproduction",
+              "_locales": ["en-US"],
+              "type": "page",
+              "slots": {
+                "content": [
+                  { "_id": "instance-id", "_pattern": "pattern-id", "type": "richTextComponent" }
+                ]
+              }
+            }
+            """);
+        var translatedHtml = ToHtml(resolvedComposition)
+            .Replace("<p>PATTERN DEFAULT</p>", "<p>VALEUR PAR DÉFAUT</p>");
+
+        var patternTranslations = HtmlToCompositionConverter.UpdateCompositionFromHtml(
+            translatedHtml,
+            resolvedComposition,
+            rawComposition,
+            TargetLocale);
+
+        Assert.IsTrue(patternTranslations.TryGetValue("pattern-id", out var translations));
+        Assert.AreEqual(1, translations.Count);
+
+        var rawPattern = CreateResolvedPatternComposition("PATTERN DEFAULT");
+        rawPattern.Remove("slots");
+        rawPattern["_id"] = "pattern-id";
+        rawPattern["parameters"] = resolvedComposition["slots"]!["content"]![0]!["parameters"]!.DeepClone();
+        rawPattern["_overridability"] = JObject.Parse(
+            """{ "parameters": { "body": "yes" }, "slots": {} }""");
+        var overridability = rawPattern["_overridability"]!.DeepClone();
+
+        HtmlToCompositionConverter.UpdatePatternFromTranslations(
+            rawPattern,
+            translations,
+            SourceLocale,
+            TargetLocale);
+
+        Assert.AreEqual("VALEUR PAR DÉFAUT",
+            rawPattern["parameters"]!["body"]!["locales"]![TargetLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
+        Assert.IsTrue(JToken.DeepEquals(overridability, rawPattern["_overridability"]),
+            "Updating a pattern must not remove its overridability metadata");
+    }
+
+    [TestMethod]
+    public void HtmlToRichText_LinkHrefWithAmpersand_IsDecoded()
+    {
+        const string href = "https://example.com?hosting=datacenter&tab=overview";
+        const string html = "<p><a href=\"https://example.com?hosting=datacenter&amp;tab=overview\">Overview</a></p>";
+
+        var richText = new HtmlToRichTextConverter().ToRichText(html);
+
+        var link = richText["root"]!["children"]![0]!["children"]![0]!;
+        Assert.AreEqual(href, link["link"]!["path"]!.ToString());
+    }
+
+    [TestMethod]
+    public void HtmlToRichText_NestedList_PreservesListHierarchy()
+    {
+        const string html = "<ul><li>Parent item<ul><li>Link one</li><li>Link two</li><li>Link three</li></ul></li></ul>";
+
+        var richText = new HtmlToRichTextConverter().ToRichText(html);
+
+        var rootChildren = (JArray)richText["root"]!["children"]!;
+        Assert.AreEqual(1, rootChildren.Count);
+
+        var outerListItems = (JArray)rootChildren[0]!["children"]!;
+        Assert.AreEqual(1, outerListItems.Count, "Only direct li elements should belong to the outer list");
+
+        var parentChildren = (JArray)outerListItems[0]!["children"]!;
+        Assert.AreEqual("text", parentChildren[0]!["type"]!.ToString());
+        Assert.AreEqual("list", parentChildren[1]!["type"]!.ToString());
+
+        var nestedListItems = (JArray)parentChildren[1]!["children"]!;
+        Assert.AreEqual(3, nestedListItems.Count);
+    }
+
+    [TestMethod]
+    public void HtmlToRichText_NestedListLinks_AreNotDuplicated()
+    {
+        const string html = "<ul><li>Parent item<ul>" +
+                            "<li><a href=\"https://example.com/one\">Link one</a></li>" +
+                            "<li><a href=\"https://example.com/two\">Link two</a></li>" +
+                            "<li><a href=\"https://example.com/three\">Link three</a></li>" +
+                            "</ul></li></ul>";
+
+        var richText = new HtmlToRichTextConverter().ToRichText(html);
+
+        var links = richText.Descendants()
+            .OfType<JObject>()
+            .Where(node => node["type"]?.ToString() == "link")
+            .ToList();
+
+        Assert.AreEqual(3, links.Count);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "https://example.com/one",
+                "https://example.com/two",
+                "https://example.com/three"
+            },
+            links.Select(link => link["link"]!["path"]!.ToString()).ToArray());
+
+        Assert.AreEqual(html, new RichTextToHtmlConverter(richText).ToHtml(),
+            "The nested list structure and links should survive the complete round trip");
     }
 }
