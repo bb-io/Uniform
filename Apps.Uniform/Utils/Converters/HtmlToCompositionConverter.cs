@@ -60,6 +60,7 @@ public static class HtmlToCompositionConverter
         }
 
         var patternTranslations = new Dictionary<string, List<PatternTranslation>>();
+        var patternOverrides = new PatternOverrides(resolvedCompositionData, rawCompositionData);
 
         var parameterDivs = doc.DocumentNode.SelectNodes("//div[@data-json-path]");
         if (parameterDivs != null)
@@ -72,12 +73,7 @@ public static class HtmlToCompositionConverter
 
                 var pathParts = ParseJsonPath(jsonPath);
 
-                // Pattern resolution makes an instance override look like an ordinary parameter.
-                // Route it back to its canonical _overrides entry before considering the shared pattern.
-                var overrideParameter = ResolveOverrideParameter(
-                    resolvedCompositionData,
-                    rawCompositionData,
-                    pathParts);
+                var overrideParameter = patternOverrides.FindParameter(pathParts);
                 if (overrideParameter != null)
                 {
                     ApplyTranslation(overrideParameter, parameterDiv, sourceLocale, targetLocale);
@@ -155,29 +151,6 @@ public static class HtmlToCompositionConverter
         SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
     }
 
-    private static JObject? ResolveOverrideParameter(
-        JObject resolvedCompositionData,
-        JObject rawCompositionData,
-        List<string> pathParts)
-    {
-        var parameterContainerIndex = pathParts.FindLastIndex(part => part is "parameters" or "fields");
-        if (parameterContainerIndex < 0 || parameterContainerIndex + 1 >= pathParts.Count)
-            return null;
-
-        JToken? owner = resolvedCompositionData;
-        for (var i = 0; i < parameterContainerIndex && owner != null; i++)
-            owner = owner.Step(pathParts[i]);
-
-        var componentId = owner?["_id"]?.ToString();
-        if (string.IsNullOrWhiteSpace(componentId))
-            return null;
-
-        var parameterContainer = pathParts[parameterContainerIndex];
-        var parameterId = pathParts[parameterContainerIndex + 1];
-
-        return rawCompositionData["_overrides"]?[componentId]?[parameterContainer]?[parameterId] as JObject;
-    }
-    
     private static void EnsureTargetLocale(JObject root, string targetLocale)
     {
         if (root["_locales"] is not JArray locales)
@@ -210,15 +183,8 @@ public static class HtmlToCompositionConverter
         return (patternId, pathParts.Skip(relativeStart).ToList());
     }
     
-    private static JObject? ResolveParameterObject(JObject root, List<string> pathParts)
-    {
-        JToken? current = root;
-
-        for (var i = 0; i < pathParts.Count - 2 && current != null; i++)
-            current = current.Step(pathParts[i]);
-
-        return current as JObject;
-    }
+    private static JObject? ResolveParameterObject(JObject root, List<string> pathParts) =>
+        root.Walk(pathParts.SkipLast(2)) as JObject;
 
     private static void SetLocaleValue(JObject parameterObject, string sourceLocale, string targetLocale, JToken value)
     {
