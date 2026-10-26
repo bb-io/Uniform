@@ -206,6 +206,85 @@ public class CompositionConverterTests
         }
         """);
 
+    private static JObject CreateResolvedSlotSectionComposition() => JObject.Parse(
+        """
+        {
+          "_id": "page-id",
+          "_name": "/industries/retail",
+          "_locales": ["en-US"],
+          "type": "page",
+          "slots": {
+            "content": [
+              {
+                "_id": "instance-id",
+                "_pattern": "pattern-id",
+                "type": "blockContainer",
+                "slots": {
+                  "component": [
+                    {
+                      "_id": "instance-id|layout-id",
+                      "type": "columnLayout",
+                      "slots": {
+                        "content": [
+                          {
+                            "_id": "instance-id|heading-id",
+                            "type": "contentBlock",
+                            "parameters": {
+                              "title": { "type": "text", "locales": { "en-US": "Get a head start with templates" } }
+                            }
+                          },
+                          {
+                            "_id": "card-id",
+                            "type": "card",
+                            "parameters": {
+                              "title": { "type": "text", "locales": { "en-US": "Task tracking" } },
+                              "body": { "type": "text", "locales": { "en-US": "Organize tasks for a team or a personal project." } },
+                              "linkUrl": { "type": "text", "value": "/software/jira/templates/task-tracking" }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+        """);
+
+    private static JObject CreateRawSlotSectionComposition() => JObject.Parse(
+        """
+        {
+          "_id": "page-id",
+          "_name": "/industries/retail",
+          "_locales": ["en-US"],
+          "type": "page",
+          "slots": {
+            "content": [
+              { "_id": "instance-id", "_pattern": "pattern-id", "type": "blockContainer" }
+            ]
+          },
+          "_overrides": {
+            "instance-id|section-id": {
+              "slots": {
+                "$slotSectionItems": [
+                  {
+                    "_id": "card-id",
+                    "type": "card",
+                    "parameters": {
+                      "title": { "type": "text", "locales": { "en-US": "Task tracking" } },
+                      "body": { "type": "text", "locales": { "en-US": "Organize tasks for a team or a personal project." } },
+                      "linkUrl": { "type": "text", "value": "/software/jira/templates/task-tracking" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+        """);
+
     private static LocalizableParameterSet CreateDefinitions(params (string ComponentType, string ParameterId)[] localizableParameters) =>
         new(localizableParameters
             .GroupBy(parameter => parameter.ComponentType)
@@ -477,6 +556,53 @@ public class CompositionConverterTests
             rawPattern["parameters"]!["body"]!["locales"]![TargetLocale]!["root"]!["children"]![0]!["children"]![0]!["text"]!.ToString());
         Assert.IsTrue(JToken.DeepEquals(overridability, rawPattern["_overridability"]),
             "Updating a pattern must not remove its overridability metadata");
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_SlotSectionOverrideItem_TranslatesRawOverrideItem()
+    {
+        var resolvedComposition = CreateResolvedSlotSectionComposition();
+        var rawComposition = CreateRawSlotSectionComposition();
+        var translatedHtml = ToHtml(resolvedComposition)
+            .Replace("<h2>Task tracking</h2>", "<h2>Suivi des tâches</h2>")
+            .Replace("<p>Organize tasks for a team or a personal project.</p>",
+                "<p>Organisez les tâches d'une équipe ou d'un projet personnel.</p>");
+
+        HtmlToCompositionConverter.UpdateCompositionFromHtml(
+            translatedHtml,
+            resolvedComposition,
+            rawComposition,
+            TargetLocale);
+
+        var card = rawComposition["_overrides"]!["instance-id|section-id"]!["slots"]!["$slotSectionItems"]![0]!;
+        Assert.AreEqual("Suivi des tâches", card["parameters"]!["title"]!["locales"]![TargetLocale]?.ToString(),
+            "Slot section items live in the instance's _overrides and must receive the translation there");
+        Assert.AreEqual("Organisez les tâches d'une équipe ou d'un projet personnel.",
+            card["parameters"]!["body"]!["locales"]![TargetLocale]?.ToString());
+        Assert.AreEqual("Task tracking", card["parameters"]!["title"]!["locales"]![SourceLocale]!.ToString());
+        Assert.AreEqual("/software/jira/templates/task-tracking", card["parameters"]!["linkUrl"]!["value"]!.ToString());
+    }
+
+    [TestMethod]
+    public void UpdateCompositionFromHtml_SlotSectionOverrideItem_IsNotRoutedIntoSharedPattern()
+    {
+        var resolvedComposition = CreateResolvedSlotSectionComposition();
+        var translatedHtml = ToHtml(resolvedComposition)
+            .Replace("<h2>Get a head start with templates</h2>", "<h2>Prenez de l'avance avec les modèles</h2>")
+            .Replace("<h2>Task tracking</h2>", "<h2>Suivi des tâches</h2>");
+
+        var patternTranslations = HtmlToCompositionConverter.UpdateCompositionFromHtml(
+            translatedHtml,
+            resolvedComposition,
+            CreateRawSlotSectionComposition(),
+            TargetLocale);
+
+        Assert.IsTrue(patternTranslations.TryGetValue("pattern-id", out var translations),
+            "The pattern's own default content must still be routed to the shared pattern");
+        CollectionAssert.AreEqual(
+            new[] { "slots.component.[0].slots.content.[0].parameters.title.locales.en-US" },
+            translations.Select(translation => string.Join('.', translation.PathParts)).ToArray(),
+            "Instance-owned slot section items must not be written into the shared pattern");
     }
 
     [TestMethod]

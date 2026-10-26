@@ -10,6 +10,7 @@ using Blackbird.Applications.SDK.Extensions.FileManagement.Interfaces;
 using Blackbird.Applications.Sdk.Utils.Extensions.Sdk;
 using Newtonsoft.Json;
 using RestSharp;
+using Apps.Uniform.Utils;
 using Apps.Uniform.Utils.Converters;
 using System.Net.Mime;
 using System.Text;
@@ -184,16 +185,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         if (string.IsNullOrWhiteSpace(compositionData["_id"]?.ToString()))
             compositionData["_id"] = compositionId;
 
-        // Remove unnecessary fields that shouldn't be in update request
-        compositionData.Remove("pattern");
-        compositionData.Remove("patternType");
-        compositionData.Remove("categoryId");
-        compositionData.Remove("description");
-        compositionData.Remove("previewImageUrl");
-        compositionData.Remove("editionId");
-        compositionData.Remove("editionName");
-
-        await PutComposition(new JObject { ["composition"] = compositionData }, originalState);
+        await PutComposition(CanvasUpdatePayload.FromReadEnvelope(rawEnvelope), originalState);
 
         foreach (var (patternId, translations) in patternTranslations)
         {
@@ -202,7 +194,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
                 throw new PluginMisconfigurationException($"Pattern with ID {patternId} not found");
 
             HtmlToCompositionConverter.UpdatePatternFromTranslations(patternData, translations, originalLocale, request.Locale);
-            await PutComposition(patternEnvelope, originalState);
+            await PutComposition(CanvasUpdatePayload.FromReadEnvelope(patternEnvelope), originalState);
         }
     }
     
