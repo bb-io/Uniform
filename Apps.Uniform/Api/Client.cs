@@ -37,21 +37,21 @@ public class Client : BlackBirdRestClient
 
     public async Task<List<T>> AutoPaginateAsync<T>(RestRequest request, Func<string, List<T>> mapFunction)
     {
-        const int limit = 100;
+        const int limit = 20;
         int offset = 0;
         
         var allItems = new List<T>();
         while (true)
         {
-            request.AddOrUpdateParameter("limit", limit);
-            request.AddOrUpdateParameter("offset", offset);
+            request.AddOrUpdateParameter("limit", limit, ParameterType.QueryString);
+            request.AddOrUpdateParameter("offset", offset, ParameterType.QueryString);
 
             var response = await ExecuteWithErrorHandling(request);
             var content = response.Content ?? string.Empty;
             var items = mapFunction.Invoke(content);
             
             allItems.AddRange(items);
-            if (items.Count < limit)
+            if (items.Count == 0)
             {
                 break;
             }
