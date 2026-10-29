@@ -17,9 +17,7 @@ public abstract class CompositionMetadataDataHandler(InvocationContext invocatio
         DataSourceContext context,
         CancellationToken cancellationToken)
     {
-        var request = new RestRequest("/api/v1/canvas")
-            .AddQueryParameter("select.fields.except", "*")
-            .AddQueryParameter("select.slots.depth", "0");
+        var request = new RestRequest("/api/v1/canvas");
 
         if (!string.IsNullOrWhiteSpace(context.SearchString))
         {
