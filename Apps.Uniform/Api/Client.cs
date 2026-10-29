@@ -51,12 +51,14 @@ public class Client : BlackBirdRestClient
             var items = mapFunction.Invoke(content);
             
             allItems.AddRange(items);
-            if (items.Count < limit)
+            if (items.Count == 0)
             {
                 break;
             }
 
-            offset += limit;
+            // Uniform may cap the response below the requested limit (currently 20 for
+            // compositions), so advance by the number of items actually returned.
+            offset += items.Count;
         }
         
         return allItems;
