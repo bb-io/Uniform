@@ -15,6 +15,12 @@ public abstract class ProjectWrapperDto<T>
     
     [JsonProperty("modified")]
     public DateTime? UpdatedAt { get; set; }
+
+    [JsonProperty("creator")]
+    public string? Creator { get; set; }
+
+    [JsonProperty("author")]
+    public string? Author { get; set; }
     
     public abstract T Data { get; set; }
 }

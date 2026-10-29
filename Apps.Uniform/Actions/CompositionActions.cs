@@ -14,6 +14,7 @@ using Apps.Uniform.Utils;
 using Apps.Uniform.Utils.Converters;
 using System.Net.Mime;
 using System.Text;
+using System.Globalization;
 using Newtonsoft.Json.Linq;
 using Blackbird.Applications.Sdk.Utils.Extensions.Files;
 using Blackbird.Filters.Transformations;
@@ -60,6 +61,15 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             apiRequest.AddParameter("categories", searchRequest.CategoryId);
         }
 
+        AddDateFilter(apiRequest, "filters.created[gt]", searchRequest.CreatedAfter);
+        AddDateFilter(apiRequest, "filters.created[lt]", searchRequest.CreatedBefore);
+        AddDateFilter(apiRequest, "filters.modified[gt]", searchRequest.UpdatedAfter);
+        AddDateFilter(apiRequest, "filters.modified[lt]", searchRequest.UpdatedBefore);
+        AddListFilter(apiRequest, "filters.creator[in]", searchRequest.IncludeCreators);
+        AddListFilter(apiRequest, "filters.creator[nin]", searchRequest.ExcludeCreators);
+        AddListFilter(apiRequest, "filters.author[in]", searchRequest.IncludeAuthors);
+        AddListFilter(apiRequest, "filters.author[nin]", searchRequest.ExcludeAuthors);
+
         var response = await Client.ExecuteWithErrorHandling(apiRequest);
         var responseDto = JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(response.Content ?? string.Empty);
         
@@ -73,6 +83,30 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
             Items = responseDto.Compositions.Select(c => c.Data).ToList(),
             TotalCount = responseDto.TotalCount ?? responseDto.Compositions.Count
         };
+    }
+
+    private static void AddDateFilter(RestRequest request, string name, DateTime? value)
+    {
+        if (value.HasValue)
+        {
+            request.AddQueryParameter(
+                name,
+                value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static void AddListFilter(RestRequest request, string name, IEnumerable<string>? values)
+    {
+        var normalizedValues = values?
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (normalizedValues is { Length: > 0 })
+        {
+            request.AddQueryParameter(name, string.Join(',', normalizedValues));
+        }
     }
     
     [Action("Get composition", Description = "Retrieve details of a specific composition by its ID")]
