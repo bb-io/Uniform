@@ -28,8 +28,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
     [Action("Search compositions", Description = "Retrieve a list of compositions based on specified criteria")]
     public async Task<SearchCompositionsResponse> SearchCompositions([ActionParameter] SearchCompositionRequest searchRequest)
     {
-        var apiRequest = new RestRequest("/api/v1/canvas")
-            .AddQueryParameter("withTotalCount", "true");
+        var apiRequest = new RestRequest("/api/v1/canvas");
         
         if (searchRequest.State != null)
         {
@@ -70,18 +69,13 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         AddListFilter(apiRequest, "filters.author[in]", searchRequest.IncludeAuthors);
         AddListFilter(apiRequest, "filters.author[nin]", searchRequest.ExcludeAuthors);
 
-        var response = await Client.ExecuteWithErrorHandling(apiRequest);
-        var responseDto = JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(response.Content ?? string.Empty);
-        
-        if (responseDto == null)
-        {
-            throw new PluginApplicationException("Failed to deserialize compositions response");
-        }
+        var compositions = await Client.AutoPaginateAsync<CompositionDto>(apiRequest, content =>
+            JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(content)?.Compositions ?? []);
 
         return new SearchCompositionsResponse
         {
-            Items = responseDto.Compositions.Select(c => c.Data).ToList(),
-            TotalCount = responseDto.TotalCount ?? responseDto.Compositions.Count
+            Items = compositions.Select(c => c.Data).ToList(),
+            TotalCount = compositions.Count
         };
     }
 
