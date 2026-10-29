@@ -11,29 +11,23 @@ public abstract class CompositionMetadataDataHandler(InvocationContext invocatio
 {
     protected abstract string FilterField { get; }
 
-    protected abstract string? GetValue(CompositionDto composition);
-
     public async Task<IEnumerable<DataSourceItem>> GetDataAsync(
         DataSourceContext context,
         CancellationToken cancellationToken)
     {
-        var request = new RestRequest("/api/v1/canvas");
+        var request = new RestRequest("/api/v1/canvas")
+            .AddQueryParameter("state", "0")
+            .AddQueryParameter("limit", "1")
+            .AddQueryParameter("facetBy", FilterField);
 
-        if (!string.IsNullOrWhiteSpace(context.SearchString))
-        {
-            request.AddQueryParameter($"filters.{FilterField}[match]", context.SearchString);
-        }
+        var response = await Client.ExecuteWithErrorHandling(request);
+        var dto = JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(response.Content ?? string.Empty);
+        IEnumerable<string> values = dto?.Facets.GetValueOrDefault(FilterField)?.Keys
+            ?? Enumerable.Empty<string>();
 
-        var compositions = await Client.AutoPaginateAsync<CompositionDto>(request, json =>
-            JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(json)?.Compositions ?? []);
-
-        return compositions
-            .Select(GetValue)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x!)
+        return values
             .Where(x => context.SearchString == null ||
                         x.Contains(context.SearchString, StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .Select(x => new DataSourceItem(x, x));
     }
