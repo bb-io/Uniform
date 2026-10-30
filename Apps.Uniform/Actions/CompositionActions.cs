@@ -104,7 +104,7 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
     }
     
     [Action("Get composition", Description = "Retrieve details of a specific composition by its ID")]
-    public async Task<CompositionResponse> GetComposition([ActionParameter] GetCompositionRequest getRequest)
+    public async Task<GetCompositionResponse> GetComposition([ActionParameter] GetCompositionRequest getRequest)
     {
         var apiRequest = new RestRequest("/api/v1/canvas")
             .AddQueryParameter("compositionId", getRequest.CompositionId);
@@ -115,13 +115,14 @@ public class CompositionActions(InvocationContext invocationContext, IFileManage
         }
 
         var response = await Client.ExecuteWithErrorHandling(apiRequest);
-        var compositionDto = JsonConvert.DeserializeObject<CompositionDto>(response.Content ?? string.Empty);
+        var compositionDto = JsonConvert.DeserializeObject<GetCompositionDto>(response.Content ?? string.Empty);
         
         if (compositionDto == null)
         {
             throw new PluginApplicationException($"Composition with ID {getRequest.CompositionId} not found");
         }
 
+        compositionDto.Data.ProjectId = compositionDto.ProjectId;
         return compositionDto.Data;
     }
     
