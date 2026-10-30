@@ -18,7 +18,6 @@ public class ProjectMapActions(InvocationContext invocationContext) : Invocable(
         [ActionParameter] GetProjectMapNodesRequest request)
     {
         var apiRequest = new RestRequest("/api/v1/project-map-nodes")
-            .AddQueryParameter("projectId", request.ProjectId)
             .AddQueryParameter("compositionId", request.CompositionId);
 
         var response = await Client.ExecuteWithErrorHandling(apiRequest);
