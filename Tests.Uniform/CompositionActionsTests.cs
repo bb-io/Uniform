@@ -75,6 +75,7 @@ public class CompositionActionsTests : TestBase
         // Assert
         Assert.IsNotNull(response);
         Assert.AreEqual(firstComposition.Id, response.Id);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(response.ProjectId));
         
         PrintObject(response);
     }
