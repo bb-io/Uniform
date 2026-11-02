@@ -3,7 +3,6 @@ using Apps.Uniform.Models.Requests.ProjectMap;
 using Apps.Uniform.Models.Responses.ProjectMap;
 using Blackbird.Applications.Sdk.Common;
 using Blackbird.Applications.Sdk.Common.Actions;
-using Blackbird.Applications.Sdk.Common.Exceptions;
 using Blackbird.Applications.Sdk.Common.Invocation;
 using Newtonsoft.Json;
 using RestSharp;
@@ -24,15 +23,9 @@ public class ProjectMapActions(InvocationContext invocationContext) : Invocable(
         var projectMapNodes = JsonConvert.DeserializeObject<ProjectMapNodesDto>(response.Content ?? string.Empty);
         var rootPath = projectMapNodes?.Nodes.FirstOrDefault()?.Path;
 
-        if (string.IsNullOrWhiteSpace(rootPath))
-        {
-            throw new PluginApplicationException(
-                $"No project map node found for composition with ID {request.CompositionId}");
-        }
-
         return new GetProjectMapNodesResponse
         {
-            RootPath = rootPath
+            RootPath = string.IsNullOrWhiteSpace(rootPath) ? string.Empty : rootPath
         };
     }
 }
