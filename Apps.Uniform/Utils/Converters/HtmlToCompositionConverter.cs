@@ -61,6 +61,7 @@ public static class HtmlToCompositionConverter
 
         var patternTranslations = new Dictionary<string, List<PatternTranslation>>();
         var patternOverrides = new PatternOverrides(resolvedCompositionData, rawCompositionData);
+        var declaredLocales = GetDeclaredLocales(rawCompositionData);
 
         var parameterDivs = doc.DocumentNode.SelectNodes("//div[@data-json-path]");
         if (parameterDivs != null)
@@ -76,7 +77,7 @@ public static class HtmlToCompositionConverter
                 var overrideParameter = patternOverrides.FindParameter(pathParts);
                 if (overrideParameter != null)
                 {
-                    ApplyTranslation(overrideParameter, parameterDiv, sourceLocale, targetLocale);
+                    ApplyTranslation(overrideParameter, parameterDiv, sourceLocale, targetLocale, declaredLocales);
                     continue;
                 }
 
@@ -90,7 +91,7 @@ public static class HtmlToCompositionConverter
                     continue;
                 }
 
-                ApplyTranslation(rawCompositionData, pathParts, parameterDiv, sourceLocale, targetLocale);
+                ApplyTranslation(rawCompositionData, pathParts, parameterDiv, sourceLocale, targetLocale, declaredLocales);
             }
         }
 
@@ -105,8 +106,9 @@ public static class HtmlToCompositionConverter
         string sourceLocale,
         string targetLocale)
     {
+        var declaredLocales = GetDeclaredLocales(patternData);
         foreach (var translation in translations)
-            ApplyTranslation(patternData, translation.PathParts, translation.ParameterDiv, sourceLocale, targetLocale);
+            ApplyTranslation(patternData, translation.PathParts, translation.ParameterDiv, sourceLocale, targetLocale, declaredLocales);
 
         if (patternData["_locales"] is JArray)
             EnsureTargetLocale(patternData, targetLocale);
@@ -117,20 +119,19 @@ public static class HtmlToCompositionConverter
         List<string> pathParts,
         HtmlNode parameterDiv,
         string sourceLocale,
-        string targetLocale)
+        string targetLocale,
+        IReadOnlyCollection<string> declaredLocales)
     {
-        var parameterObject = ResolveParameterObject(root, pathParts);
-        if (parameterObject == null)
-            return; // Path not found, skip
-
-        ApplyTranslation(parameterObject, parameterDiv, sourceLocale, targetLocale);
+        if (ResolveParameterObject(root, pathParts) is { } parameterObject)
+            ApplyTranslation(parameterObject, parameterDiv, sourceLocale, targetLocale, declaredLocales);
     }
 
     private static void ApplyTranslation(
         JObject parameterObject,
         HtmlNode parameterDiv,
         string sourceLocale,
-        string targetLocale)
+        string targetLocale,
+        IReadOnlyCollection<string> declaredLocales)
     {
         var parameterType = parameterObject["type"]?.ToString();
         if (string.IsNullOrEmpty(parameterType))
@@ -149,6 +150,23 @@ public static class HtmlToCompositionConverter
         }
 
         SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
+        FillLocalesWithoutValue(parameterObject, sourceLocale, declaredLocales);
+    }
+
+    private static List<string> GetDeclaredLocales(JObject root) =>
+        (root["_locales"] as JArray)?.Select(locale => locale.ToString()).ToList() ?? [];
+
+    private static void FillLocalesWithoutValue(JObject parameterObject, string sourceLocale, IEnumerable<string> declaredLocales)
+    {
+        if (parameterObject["locales"] is not JObject locales ||
+            string.IsNullOrEmpty(sourceLocale) ||
+            locales[sourceLocale] is not { Type: not JTokenType.Null } sourceValue)
+        {
+            return;
+        }
+
+        foreach (var locale in declaredLocales.Where(locale => locales[locale] is null or { Type: JTokenType.Null }))
+            locales[locale] = sourceValue.DeepClone();
     }
 
     private static void EnsureTargetLocale(JObject root, string targetLocale)

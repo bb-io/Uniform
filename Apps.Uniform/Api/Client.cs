@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Net;
+using System.Text;
 using Apps.Uniform.Constants;
 using Apps.Uniform.Models.Dtos;
 using Blackbird.Applications.Sdk.Common.Authentication;
@@ -12,6 +15,8 @@ namespace Apps.Uniform.Api;
 
 public class Client : BlackBirdRestClient
 {
+    private const double BytesInMegabyte = 1024 * 1024;
+
     private readonly List<AuthenticationCredentialsProvider> _credentialsProviders;
     
     public Client(List<AuthenticationCredentialsProvider> credentialsProviders) : base(new()
@@ -64,6 +69,11 @@ public class Client : BlackBirdRestClient
 
     protected override Exception ConfigureErrorException(RestResponse response)
     {
+        if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
+        {
+            return CreateRequestTooLargeException(response.Request);
+        }
+
         if (string.IsNullOrEmpty(response.Content))
         {
             if (string.IsNullOrEmpty(response.ErrorMessage))
@@ -100,5 +110,17 @@ public class Client : BlackBirdRestClient
         }
         
         return new PluginApplicationException(errorMessage);
+    }
+
+    private static PluginApplicationException CreateRequestTooLargeException(RestRequest request)
+    {
+        var bodySize = request.Parameters.OfType<BodyParameter>().FirstOrDefault()?.Value is string body
+            ? string.Format(CultureInfo.InvariantCulture, " ({0:0.0} MB)", Encoding.UTF8.GetByteCount(body) / BytesInMegabyte)
+            : string.Empty;
+
+        return new PluginApplicationException(
+            $"Uniform rejected the request because its body{bodySize} exceeds the size Uniform accepts per request (about 6 MB). " +
+            "The whole composition, including all of its locales, is sent in one request. " +
+            "Reduce the composition size, for example by moving repeated content into patterns, which are saved separately.");
     }
 }
