@@ -149,7 +149,9 @@ public static class HtmlToCompositionConverter
             translatedValue = HttpUtility.HtmlDecode(textNode.InnerText);
         }
 
-        SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
+        if (!UntranslatedValueDetector.ReplacesTranslationWithSource(parameterObject, sourceLocale, targetLocale, translatedValue))
+            SetLocaleValue(parameterObject, sourceLocale, targetLocale, translatedValue);
+
         FillLocalesWithoutValue(parameterObject, sourceLocale, declaredLocales);
     }
 
