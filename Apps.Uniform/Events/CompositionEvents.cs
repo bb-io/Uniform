@@ -1,10 +1,10 @@
-﻿using Apps.Uniform.Events.Models;
+﻿using Apps.Uniform.Api;
+using Apps.Uniform.Events.Models;
 using Apps.Uniform.Models.Dtos.Compositions;
 using Apps.Uniform.Models.Responses.Compositions;
 using Blackbird.Applications.Sdk.Common.Invocation;
 using Blackbird.Applications.Sdk.Common.Polling;
 using Newtonsoft.Json;
-using RestSharp;
 
 namespace Apps.Uniform.Events;
 
@@ -12,6 +12,7 @@ namespace Apps.Uniform.Events;
 public class CompositionEvents(InvocationContext invocationContext) : Invocable(invocationContext)
 {
     private const int PageLimit = 150;
+    private const string PublishedState = "64";
     
     [PollingEvent("On compositions created", Description = "Polling event that periodically checks for newly created compositions")]
     public async Task<PollingEventResponse<DateMemory, SearchCompositionsResponse>> OnCompositionsCreatedAsync(
@@ -83,27 +84,13 @@ public class CompositionEvents(InvocationContext invocationContext) : Invocable(
             return CreateInitialResponse();
         }
 
-        var compositions = await FetchCompositionsAsync(state, orderBy);
+        var compositions = await FetchCompositionsPageAsync(state, orderBy, 0);
         var filteredCompositions = compositions
             .Where(filter)
             .Select(c => c.Data)
             .ToList();
 
         return CreateSuccessResponse(filteredCompositions);
-    }
-
-    private async Task<List<CompositionDto>> FetchCompositionsAsync(string state, string orderBy)
-    {
-        var apiRequest = new RestRequest("/api/v1/canvas");
-        apiRequest.AddParameter("state", state);
-        apiRequest.AddParameter("orderBy", orderBy);
-        apiRequest.AddParameter("limit", PageLimit);
-        apiRequest.AddParameter("offset", 0);
-
-        var response = await Client.ExecuteWithErrorHandling(apiRequest);
-        var compositionsDto = JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(response.Content ?? string.Empty);
-        
-        return compositionsDto?.Compositions ?? new List<CompositionDto>();
     }
 
     private static PollingEventResponse<DateMemory, SearchCompositionsResponse> CreateInitialResponse()
@@ -126,7 +113,7 @@ public class CompositionEvents(InvocationContext invocationContext) : Invocable(
 
         while (true)
         {
-            var page = await FetchCompositionsPageAsync(offset);
+            var page = await FetchCompositionsPageAsync(PublishedState, "updated_at_DESC", offset);
             if (page.Count == 0)
                 break;
 
@@ -148,13 +135,9 @@ public class CompositionEvents(InvocationContext invocationContext) : Invocable(
         return result;
     }
 
-    private async Task<List<CompositionDto>> FetchCompositionsPageAsync(int offset)
+    private async Task<List<CompositionDto>> FetchCompositionsPageAsync(string state, string orderBy, int offset)
     {
-        var apiRequest = new RestRequest("/api/v1/canvas");
-        apiRequest.AddParameter("state", "64");
-        apiRequest.AddParameter("orderBy", "updated_at_DESC");
-        apiRequest.AddParameter("limit", PageLimit);
-        apiRequest.AddParameter("offset", offset);
+        var apiRequest = new CompositionMetadataListRequest(state, orderBy, PageLimit, offset);
 
         var response = await Client.ExecuteWithErrorHandling(apiRequest);
         var dto = JsonConvert.DeserializeObject<CompositionsDto<CompositionDto>>(response.Content ?? string.Empty);
